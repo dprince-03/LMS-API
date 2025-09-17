@@ -1,7 +1,10 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
-const signUp = async (req, res) => {
+// @desc    Register new user
+// @access  Public
+// user registration routes
+const signUp = (req, res) => {
     res.send('Sign Up Page');
     res.status(200).json({
         status: 'success',
@@ -10,25 +13,69 @@ const signUp = async (req, res) => {
 };
 
 const register = async (req, res) => {
-    const { firstName, lastName, username, email, password} = req.body;
+    try {
+        const { firstName, lastName, username, email, password} = req.body;
+        
+        if ( !firstName || !lastName || !username || !email || !password ) {
+            return res.status(400).json({ 
+                error: true,
+                message: 'All fields are required !',
+            });
+        }
     
-    if ( !firstName || !lastName || !username || !email || !password ) {
-        return res.status(400).json({ 
-            error: true,
-            message: 'All fields are required !',
+        // hash the password
+        const saltRounds = 10;
+        const hashedPassword = await bcrypt.hash(password, saltRounds);
+        console.log(req.body);       
+    } catch (error) {
+        console.error("Error registering user:", error);
+        return res.status(400).json({
+            status: 'fail',
+            message: 'Unable to register user',
         });
     }
-
-
 };
 
-const signIn = async (req, res) => {};
+const signIn = async (req, res) => {
+    res.send('Sign In Page');
+    res.status(200).json({
+        status: 'success',
+        message: 'Sign In Page',
+    });
+};
 
-const login = async (req, res) => {};
+const login = async (req, res) => {
+    
+    try {
+        const { email , password } = req.body;
+    
+        if (!email || !password) {
+            res.status(400).json({
+                error: true,
+                message: 'All fields are required !',
+            });
+        }
+    
+        console.log(req.body);
+        return res.status(200).json({
+            status: 'success',
+            message: 'Login successful',
+        });        
+    } catch (error) {
+        console.error("Error logging in user:", error);
+        return res.status(400).json({
+            status: 'fail',
+            message: 'Unable to login user',
+        });
+    }
+};
 
 const googleAccount = async (req, res) => {};
 
-const signOut = async (req, res) => {
+// @desc    Logout user
+// @route   POST
+// @access  Public
+const signOut = (req, res) => {
     try {
         const clearCookie = () => { 
             res.cookie('jwt', 'loggedOut', {
@@ -44,20 +91,15 @@ const signOut = async (req, res) => {
                 status: 'success',
                 message: 'User signed out successfully',
             });
-        } else {
-            res.status(400).json({
-                status: 'fail',
-                message: 'Unable to sign out user',
-            });
         }
         
     } catch (error) {
-        res.status(500).json({
-            status: 'error',
-            message: 'Internal server error',
+        console.error("Error signing up user:", error);
+        return res.status(400).json({
+            status: 'fail',
+            message: 'Unable to sign out user',
         });
     }
-    
 };
 
 module.exports = {
