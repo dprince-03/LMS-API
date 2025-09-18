@@ -2,6 +2,7 @@ require('dotenv').config();
 const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const express = require('express');
+const ip = require('ip');
 const morgan = require('morgan');
 const rateLimit = require("express-rate-limit");
 
@@ -33,7 +34,7 @@ app.use('/api', authRouter);
 
 app.listen(PORT, () => {
     console.log(`\n## Server is starting... ##`);
-    console.log(`Server is running on: http://localhost:${PORT}`);
+    console.log(`Server is running on: http://localhost:${PORT} with IP: ${ip.address()}`);
     console.log(`- Authentication routes:
         url: http://localhost:${PORT}/api/auth/sign-up
         url: http://localhost:${PORT}/api/auth/sign-in
