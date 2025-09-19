@@ -7,6 +7,8 @@ const morgan = require('morgan');
 const rateLimit = require("express-rate-limit");
 
 const authRouter = require('./src/routes/auth.routes');
+const bookRouter = require('./src/routes/books.routes');
+const userRouter = require('./src/routes/user.routes');
 
 const app = express();
 
@@ -31,6 +33,8 @@ const limiter = rateLimit({
 
 app.use('/api', limiter);
 app.use('/api', authRouter);
+app.use('/api', userRouter);
+app.use('/api', bookRouter);
 
 app.listen(PORT, () => {
     console.log(`\n## Server is starting... ##`);
