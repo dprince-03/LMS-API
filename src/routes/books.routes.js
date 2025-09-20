@@ -1,13 +1,25 @@
 const express = require('express');
 
+const { 
+    createBooksPg,
+    createBooks,
+    getAllBooks,
+    getBooksById,
+    updateBooksById,
+    deleteBooksById,
+    borrowBooks,
+    returnBooks,
+ } = require('../controllers/books.controllers');
+
 const bookRouter = express.Router();
 
-bookRouter.get('/books'); // Retrieve all books.
-bookRouter.get("/books/:id"); // Retrieve specific book by ID.
-bookRouter.post("/books"); // Create a book (Admin/Librarian).
-bookRouter.put("/books/:id"); // Update a book by ID (Admin/Librarian).
-bookRouter.delete("/books/id"); // Delete a book by ID (Admin).
-bookRouter.post("/books/:id/borrow"); // Borrow a book (Member, if available).
-bookRouter.post("/books/:id/return");  // Return a borrowed book (Member).
+bookRouter.get('/', createBooksPg); // Create a book (Admin/Librarian).
+bookRouter.post("/books", createBooks); // Create a book (Admin/Librarian).
+bookRouter.get('/books', getAllBooks); // Retrieve all books.
+bookRouter.get("/books/:id", getBooksById); // Retrieve specific book by ID.
+bookRouter.put("/books/:id", updateBooksById); // Update a book by ID (Admin/Librarian).
+bookRouter.delete("/books/:id", deleteBooksById); // Delete a book by ID (Admin).
+bookRouter.post("/books/:id/borrow", borrowBooks); // Borrow a book (Member, if available).
+bookRouter.post("/books/:id/return", returnBooks);  // Return a borrowed book (Member).
 
 module.exports = bookRouter;

@@ -70,8 +70,6 @@ const login = async (req, res) => {
     }
 };
 
-const googleAccount = async (req, res) => {};
-
 // @desc    Logout user
 // @route   POST
 // @access  Public
@@ -108,5 +106,4 @@ module.exports = {
     signIn,
     login,
     signOut,
-    googleAccount,
 };
