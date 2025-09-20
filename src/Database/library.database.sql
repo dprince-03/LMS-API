@@ -1,7 +1,6 @@
 CREATE DATABASE IF NOT EXISTS library_db;
 USE library_db;
 
--- Fixed Users table
 CREATE TABLE users (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     first_name VARCHAR(255) NOT NULL,
@@ -23,7 +22,6 @@ CREATE TABLE users (
     INDEX idx_role (role)
 );
 
--- Fixed Authors table
 CREATE TABLE authors (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     first_name VARCHAR(255) NOT NULL,
@@ -39,7 +37,6 @@ CREATE TABLE authors (
     INDEX idx_email (email)
 );
 
--- Fixed Books table
 CREATE TABLE books (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     isbn VARCHAR(255) NOT NULL UNIQUE,
@@ -64,7 +61,6 @@ CREATE TABLE books (
     INDEX idx_status (status)
 );
 
--- Fixed Borrow Records table
 CREATE TABLE borrow_records (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT UNSIGNED NOT NULL,
