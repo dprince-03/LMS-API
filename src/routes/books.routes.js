@@ -1,7 +1,6 @@
 const express = require('express');
 
 const { 
-    createBooksPg,
     createBooks,
     getAllBooks,
     getBooksById,
@@ -13,8 +12,7 @@ const {
 
 const bookRouter = express.Router();
 
-bookRouter.get('/', createBooksPg); // Create a book (Admin/Librarian).
-bookRouter.post("/books", createBooks); // Create a book (Admin/Librarian).
+bookRouter.post("/books/create-cards", createBooks); // Create a book (Admin/Librarian).
 bookRouter.get('/books', getAllBooks); // Retrieve all books.
 bookRouter.get("/books/:id", getBooksById); // Retrieve specific book by ID.
 bookRouter.put("/books/:id", updateBooksById); // Update a book by ID (Admin/Librarian).
