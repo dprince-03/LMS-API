@@ -4,14 +4,6 @@ const jwt = require('jsonwebtoken');
 // @desc    Register new user
 // @access  Public
 // user registration routes
-const signUp = (req, res) => {
-    res.send('Sign Up Page');
-    res.status(200).json({
-        status: 'success',
-        message: 'Sign Up Page',
-    });
-};
-
 const register = async (req, res) => {
     try {
         const { firstName, lastName, username, email, password} = req.body;
@@ -36,14 +28,9 @@ const register = async (req, res) => {
     }
 };
 
-const signIn = async (req, res) => {
-    res.send('Sign In Page');
-    res.status(200).json({
-        status: 'success',
-        message: 'Sign In Page',
-    });
-};
-
+// @desc    Login user
+// @access  Public
+// user login routes
 const login = async (req, res) => {
     
     try {
@@ -101,9 +88,7 @@ const signOut = (req, res) => {
 };
 
 module.exports = {
-    signUp,
     register,
-    signIn,
     login,
     signOut,
 };
