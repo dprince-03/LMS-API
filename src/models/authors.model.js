@@ -1,11 +1,23 @@
 const { query, queryWithTransaction } = require('../config/database.config');
+const { formatBook } = require("./books.model");
 
 // Function to create a new author
 const createAuthor = async (authorData) => {
     try {
-        const sql = ``;
+        const sql = `
+            INSERT INTO authorS (first_name, last_name, image, date_of_birth, biography, phone, email)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `;
 
-        const params = [];
+        const params = [
+            authorData.first_name,
+            authorData.last_name,
+            authorData.image || null,
+            authorData.date_of_birth || null,
+            authorData.biography || null,
+            authorData.phone || null,
+            authorData.email || null,
+        ];
 
         const result = await query(sql, params);
 
@@ -20,16 +32,16 @@ const findAllAuthors = async (options = {}) => {
     try {
         const { limit = 10, offset = 0, search = '' } = options;
 
-        let sql = '';
+        let sql = 'SELECT * FROM  authors';
 
         let params = [];
 
         if ( search ) {
-            sql += ``;
+            sql += ` WHERE first_name LIKE ? OR last_name LIKE ? OR email LIKE ? `;
             params = [`%${search}%`, `%${search}%`, `%${search}%`];
         }
 
-        sql += ``;
+        sql += ` ORDER BY created_at DESC LIMIT ? OFFSET ? `;
         params.push(limit, offset);
 
         const rows = await query(sql, params);
@@ -43,7 +55,7 @@ const findAllAuthors = async (options = {}) => {
 // Function to get an author by ID
 const findAuthorById = async (id) => {
     try {
-        const sql = ``;
+        const sql = ` SELECT * FROM authors WHERE id = ? `;
 
         const rows = await query(sql, [id]);
 
@@ -60,7 +72,7 @@ const findAuthorById = async (id) => {
 // Find author by email
 const findAuthorByEmail = async (email) => {
     try {
-        const sql = ``;
+        const sql = ` SELECT * FROM authors WHERE email = ? `;
 
         const rows = await query(sql, [email]);
 
@@ -91,7 +103,7 @@ const updateAuthor = async (id, updateData) => {
 
         params.push(id);
 
-        const sql = ``;
+        const sql = ` UPDATE authors SET ${fields.join(', ')} WHERE id = ? `;
 
         await query(sql, params);
 
@@ -104,7 +116,7 @@ const updateAuthor = async (id, updateData) => {
 // delete an author
 const deleteAuthorById = async (id) => {
     try {
-        const sql = ``;
+        const sql = ` DELETE FROM authors WHERE id = ? `;
 
         const result = await query(sql, [id]);
 
@@ -116,24 +128,23 @@ const deleteAuthorById = async (id) => {
 
 // Get books by author ID
 const getBooksByAuthorId = async (authorId) => {try {
-    const sql = ``;
+    const sql = ` SELECT * FROM books WHERE author_id = ? `;
 
     const rows = await query(sql, [authorId]);
 
-    const { formatBook } = require('./books.model');
     return rows.map(formatBook);
 } catch (error) {
-    
+    throw new Error("Error fetching books by author ID: ${error.message}");    
 }};
 
 // Count total authors
 const countAuthors = async (search = '') => {
     try {
-        let sql = ``;
+        let sql = ` SELECT COUNT(*) AS total FROM authors `;
         let params = [];
 
         if( search ) {
-            sql += ``;
+            sql += ` WHERE first_name LIKE ? OR last_name LIKE ? OR email LIKE ? `;
             params = [`%${search}%`, `%${search}%`, `%${search}%`];
         }
 
@@ -150,10 +161,22 @@ const formatAuthor = (authorData) => {
         return null;
     }
 
-    return {};
+    return {
+        id: authorData.id,
+        first_name: authorData.first_name,
+        last_name: authorData.last_name,
+        full_name: `${authorData.first_name} ${authorData.last_name}`.trim(),
+        image: authorData.image,
+        date_of_birth: authorData.date_of_birth,
+        biography: authorData.biography,
+        phone: authorData.phone,
+        email: authorData.email,
+        created_at: authorData.created_at,
+        updated_at: authorData.updated_at,
+    };
 };
 
-module.exports ={
+module.exports = {
     createAuthor,
     findAllAuthors,
     findAuthorById,
