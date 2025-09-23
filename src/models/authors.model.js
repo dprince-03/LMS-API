@@ -5,7 +5,7 @@ const { formatBook } = require("./books.model");
 const createAuthor = async (authorData) => {
     try {
         const sql = `
-            INSERT INTO authorS (first_name, last_name, image, date_of_birth, biography, phone, email)
+            INSERT INTO authors (first_name, last_name, image, date_of_birth, biography, phone, email)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         `;
 
@@ -21,7 +21,7 @@ const createAuthor = async (authorData) => {
 
         const result = await query(sql, params);
 
-        return await getAuthorById(result.insertId);
+        return await findAuthorById(result.insertId);
     } catch (error) {
         throw new Error(`Error creating author: ${error.message}`);
     }
