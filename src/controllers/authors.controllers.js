@@ -216,7 +216,57 @@ const updateAuthorById = async (req, res) => {
     }
 };
 
-const deleteAuthorById = async (req, res) => {};
+const deleteAuthorById = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if ( !id || isNaN(id) ) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid author ID. \nValid author ID is requried',
+            });
+        }
+
+        const existingAuthor = await findAuthorById(parseInt(id));
+        if ( !existingAuthor ) {
+            return res.status(404).json({
+                success: false,
+                message: 'Author not found.',
+            });
+        }
+
+        const authorBooks = await getBooksByAuthorId(parseInt(id));
+        if ( authorBooks.length > 0 ) {
+            return res.status(409).json({
+                success: false,
+                message: 'Cannot delete author with associated books. \nPlease remove or reassign the books first.',
+            });
+        }
+
+        
+        // Delete author
+        const deleted = await deleteAuthorById(parseInt(id));
+
+        if (!deleted) {
+            return res.status(404).json({
+                success: false,
+                message: 'Author not found or already deleted'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Author deleted successfully.',
+        });
+    } catch (error) {
+        console.error(` Error deleting author: ${error.message} `);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error.',
+            error: error.message,
+        });
+    }
+};
 
 module.exports = {
     createAuthor,
