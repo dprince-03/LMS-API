@@ -55,7 +55,7 @@ const findAllBooks = async (options = {}) => {
 		// Search conditions
 		if (search) {
 			whereConditions.push(
-				'(b.title LIKE ? OR b.isbn LIKE ? OR CONCAT(a.first_name, " ", a.last_name) LIKE ?)'
+				"(b.title LIKE ? OR b.isbn LIKE ? OR CONCAT(a.first_name, ' ', a.last_name) LIKE ?)"
 			);
 			params.push(`%${search}%`, `%${search}%`, `%${search}%`);
 		}
@@ -79,8 +79,7 @@ const findAllBooks = async (options = {}) => {
 			sql += " WHERE " + whereConditions.join(" AND ");
 		}
 
-		sql += " ORDER BY b.created_at DESC LIMIT ? OFFSET ?";
-		params.push(limit, offset);
+		sql += ` ORDER BY b.created_at DESC LIMIT ${offset}, ${limit}`;
 
 		const rows = await query(sql, params);
 		return rows.map((row) => {
@@ -319,7 +318,7 @@ const countBooks = async (filters = {}) => {
 		if (filters.search) {
 			sql += " LEFT JOIN authors a ON b.author_id = a.id";
 			whereConditions.push(
-				'(b.title LIKE ? OR b.isbn LIKE ? OR CONCAT(a.first_name, " ", a.last_name) LIKE ?)'
+				"(b.title LIKE ? OR b.isbn LIKE ? OR CONCAT(a.first_name, ' ', a.last_name) LIKE ?)"
 			);
 			params.push(
 				`%${filters.search}%`,

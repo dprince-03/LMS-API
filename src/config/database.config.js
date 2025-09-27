@@ -12,8 +12,6 @@ const pool = mysql.createPool({
 	connectionLimit: 10,
 	queueLimit: 0,
 	acquireTimeout: 60000,
-	timeout: 60000,
-	reconnect: true,
 });
 
 // Test database connection
@@ -37,7 +35,7 @@ const testConnection = async () => {
 // Query helper function
 const query = async (sql, params = []) => {
 	try {
-		const [rows] = await pool.execute(sql, params);
+		const [rows] = await pool.query(sql, params);
 		return rows;
 	} catch (error) {
 		console.error("Database query error:", error.message);
@@ -50,7 +48,7 @@ const query = async (sql, params = []) => {
 // Query with transaction helper function
 const queryWithTransaction = async (connection, sql, params = []) => {
 	try {
-		const [rows] = await connection.execute(sql, params);
+		const [rows] = await connection.query(sql, params);
 		return rows;
 	} catch (error) {
 		console.error("Transaction query error:", error.message);
