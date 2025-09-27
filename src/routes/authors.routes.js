@@ -1,19 +1,19 @@
 const express = require('express');
 
 const { 
-    createAuthor,
+    createAuthorController,
     getAllAuthors,
     getAuthorById,
     updateAuthorById,
-    deleteAuthorById,
+    deleteAuthorByIdController,
 } = require('../controllers/authors.controllers');
 
 const authorRouter = express.Router();
 
-authorRouter.post('/author/create-profile', createAuthor);
+authorRouter.post('/author/create-profile', createAuthorController);
 authorRouter.get('/author', getAllAuthors);
 authorRouter.get('/author/:id', getAuthorById);
 authorRouter.put('/author/:id', updateAuthorById);
-authorRouter.delete('/author/:id', deleteAuthorById);
+authorRouter.delete('/author/:id', deleteAuthorByIdController);
 
 module.exports = authorRouter;

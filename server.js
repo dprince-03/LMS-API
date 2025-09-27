@@ -2,13 +2,13 @@ require('dotenv').config();
 const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const express = require('express');
-const ip = require('ip');
+// const ip = require('ip');
 const morgan = require('morgan');
 const rateLimit = require("express-rate-limit");
 
 const authRouter = require('./src/routes/auth.routes');
 const bookRouter = require('./src/routes/books.routes');
-const userRouter = require('./src/routes/user.routes');
+const userRouter = require('./src/routes/users.routes');
 const authorRouter = require('./src/routes/authors.routes');
 
 const app = express();
@@ -40,7 +40,7 @@ app.use('/api', bookRouter);
 
 app.listen(PORT, () => {
     console.log(`\n## Server is starting... ##`);
-    console.log(`Server is running on: http://localhost:${PORT} with IP: ${ip.address()}`);
+    console.log(`Server is running on: http://localhost:${PORT}`);
     console.log(`- Authentication routes:
         url: http://localhost:${PORT}/api/auth/sign-up
         url: http://localhost:${PORT}/api/auth/sign-in

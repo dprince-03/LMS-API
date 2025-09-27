@@ -8,11 +8,11 @@ const {
     deleteBooksById,
     borrowBooks,
     returnBooks,
- } = require('../controllers/books.controllers');
+} = require('../controllers/books.controllers');
 
 const bookRouter = express.Router();
 
-bookRouter.post("/books/create-cards", createBooks); // Create a book (Admin/Librarian).
+bookRouter.post("/books/profile", createBooks); // Create a book (Admin/Librarian).
 bookRouter.get('/books', getAllBooks); // Retrieve all books.
 bookRouter.get("/books/:id", getBooksById); // Retrieve specific book by ID.
 bookRouter.put("/books/:id", updateBooksById); // Update a book by ID (Admin/Librarian).

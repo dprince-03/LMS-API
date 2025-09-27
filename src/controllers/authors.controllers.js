@@ -7,10 +7,10 @@ const {
     deleteAuthorById,
     getBooksByAuthorId,
     countAuthors,
-    updateAuthor,
+
 } = require('../models/authors.model');
 
-const createAuthor = async (req, res) => {
+const createAuthorController = async (req, res) => {
     try {
         const {first_name, last_name, image, date_of_birth, biography, phone, email} = req.body;
 
@@ -216,7 +216,7 @@ const updateAuthorById = async (req, res) => {
     }
 };
 
-const deleteAuthorById = async (req, res) => {
+const deleteAuthorByIdController = async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -269,9 +269,9 @@ const deleteAuthorById = async (req, res) => {
 };
 
 module.exports = {
-    createAuthor,
+    createAuthorController,
     getAllAuthors,
     getAuthorById,
     updateAuthorById,
-    deleteAuthorById,
+    deleteAuthorByIdController,
 };
