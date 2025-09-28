@@ -279,6 +279,61 @@ const updateUserController = async (req, res) => {
             }
         }
 
+        if ( updateData.user_name && updateData.user_name !== existingUser.user_name ) {
+            const usernameExist = await findUserByUsername(updateData.user_name);
+            if ( usernameExist ) {
+                return res.status(409).json({
+                    success: false,
+                    message: 'Username is already taken'
+                });
+            }
+        }
+
+         // Validate password strength if being updated
+        if (updateData.password && updateData.password.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: 'Password must be at least 6 characters long'
+            });
+        }
+
+        // Validate role if being updated
+        if (updateData.role) {
+            const validRoles = ['Admin', 'Librarian', 'User'];
+            if (!validRoles.includes(updateData.role)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid role. Must be Admin, Librarian, or User'
+                });
+            }
+        }
+
+        // Remove undefined and null values, and protect certain fields
+        const protectedFields = ['id', 'created_at', 'updated_at', 'deleted_at'];
+        const filteredData = {};
+        
+        Object.keys(updateData).forEach(key => {
+            if (!protectedFields.includes(key) && updateData[key] !== undefined && updateData[key] !== null) {
+                filteredData[key] = updateData[key];
+            }
+        });
+
+        if (Object.keys(filteredData).length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'No valid fields to update'
+            });
+        }
+
+        // Update user
+        const updatedUser = await updateUserById(parseInt(id), filteredData);
+
+        res.status(200).json({
+            success: true,
+            message: 'User updated successfully',
+            data: updatedUser
+        });
+
 
     } catch (error) {
         console.error('Error updating user:', error.message);
@@ -290,7 +345,182 @@ const updateUserController = async (req, res) => {
     }
 };
 
-const deleteUserController = async (req, res) => {};
+const deleteUserController = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Validate ID
+        if (!id || isNaN(id)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid user ID is required'
+            });
+        }
+
+        // Check if user exists
+        const existingUser = await findUserById(parseInt(id));
+        if (!existingUser) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        // Check if user has active borrows (business rule)
+        const activeBorrows = await getUserActiveBorrowedCount(parseInt(id));
+        if (activeBorrows > 0) {
+            return res.status(409).json({
+                success: false,
+                message: `Cannot delete user. User has ${activeBorrows} active borrow(s)`,
+                active_borrows: activeBorrows
+            });
+        }
+
+        // Prevent deleting the last admin (business rule)
+        if (existingUser.role === 'Admin') {
+            const adminUsers = await findAllUsers({ role: 'Admin', limit: 100 });
+            const activeAdmins = adminUsers.filter(user => user.is_active && user.id !== parseInt(id));
+            
+            if (activeAdmins.length === 0) {
+                return res.status(409).json({
+                    success: false,
+                    message: 'Cannot delete the last active admin user'
+                });
+            }
+        }
+
+        // Soft delete user (sets deleted_at timestamp)
+        const deleted = await deleteUserById(parseInt(id));
+
+        if (!deleted) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found or already deleted'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'User deleted successfully'
+        });
+        
+    } catch (error) {
+         console.error('Error deleting user:', error.message);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+
+// Get user profile (for current logged-in user) - GET /users/profile
+const getUserProfileController = async (req, res) => {
+    try {
+        // This will be used after authentication middleware is implemented
+        // For now, it's a placeholder
+        const userId = req.user?.id; // Will come from auth middleware
+
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication required'
+            });
+        }
+
+        const user = await findUserById(userId);
+        
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        // Get user statistics
+        const activeBorrows = await getUserActiveBorrowedCount(userId);
+        const overdueBooks = await getUserOverdueBooks(userId);
+        const recentBorrows = await getUserBorrowRecords(userId, { limit: 5 });
+
+        const userProfile = {
+            ...user,
+            statistics: {
+                active_borrows: activeBorrows,
+                overdue_books: overdueBooks.length,
+                can_borrow_more: await canUserBorrowMore(userId)
+            },
+            recent_activity: recentBorrows
+        };
+
+        res.status(200).json({
+            success: true,
+            message: 'User profile retrieved successfully',
+            data: userProfile
+        });
+
+    } catch (error) {
+        console.error('Error fetching user profile:', error.message);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+// Get users list for public view (limited data) - GET /users/public
+const getPublicUsersController = async (req, res) => {
+    try {
+        const { 
+            page = 1, 
+            limit = 20, 
+            role,
+            is_active = 'true' 
+        } = req.query;
+
+        const offset = (parseInt(page) - 1) * parseInt(limit);
+
+        const options = {
+            limit: parseInt(limit),
+            offset,
+            is_active: is_active === 'true'
+        };
+
+        if (role) options.role = role;
+
+        const users = await findAllUsers(options);
+        
+        // Convert to public format (less sensitive data)
+        const publicUsers = users.map(formatUserPublic);
+
+        const filters = { is_active: is_active === 'true' };
+        if (role) filters.role = role;
+
+        const totalUsers = await countUsers(filters);
+        const totalPages = Math.ceil(totalUsers / parseInt(limit));
+
+        res.status(200).json({
+            success: true,
+            message: 'Public users list retrieved successfully',
+            data: publicUsers,
+            pagination: {
+                current_page: parseInt(page),
+                total_pages: totalPages,
+                total_items: totalUsers,
+                items_per_page: parseInt(limit)
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching public users:', error.message);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
 
 module.exports = {
     createUser: createUserController,
@@ -298,6 +528,6 @@ module.exports = {
     getUserById: getUserByIdController,
     updateUser: updateUserController,
     deleteUser: deleteUserController,
-    // getUserProfile,
-    // getPublicUsers,
+    getUserProfile: getUserProfileController,
+    getPublicUsers: getPublicUsersController
 };
