@@ -1,29 +1,134 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
+const { 
+    createUser,
+    findUserByEmailOrUsername, 
+    verifyPassword,
+    updateUserLastLogin, 
+} = require('../models/users.model');
+
+
+function generateJWT (userId, email, role) {
+    return jwt.sign(
+        {
+            id: userId,
+            email,
+            role,
+        }, 
+        process.env.JWT_SECRET, 
+        {
+            expiresIn: process.env.JWT_EXPIRE || '7d',
+        }
+    );
+}
+
 // @desc    Register new user
 // @access  Public
 // user registration routes
 const register = async (req, res) => {
     try {
-        const { firstName, lastName, username, email, password} = req.body;
+        const { 
+            first_name, 
+            last_name, 
+            user_name,
+            phone,
+            email, 
+            password,
+            image_url, 
+        } = req.body;
         
-        if ( !firstName || !lastName || !username || !email || !password ) {
+        if ( !first_name || !last_name || !user_name || !email || !password ) {
             return res.status(400).json({ 
                 error: true,
                 message: 'All fields are required !',
+            });
+        }
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if ( !emailRegex.test(email) ) {
+            return res.status(400).json({
+                success: false, 
+                message: 'Invalid email format',
+            });
+        }
+
+        if ( password.length < 8 ) {
+            res.status(400).json({
+                success: false,
+                message: 'Password must be at least 6 characters long',
+            });
+        }
+
+        const hasUpperCase = /[A-Z]/.test(password);
+        const hasLowerCase = /[a-z]/.test(password);
+        const hasNumber = /\d/.test(password);
+
+        if ( !hasUpperCase || !hasLowerCase || !hasNumber ) {
+            return res.status(400).json({
+                success: false,
+                message: 'Password must contain at least one uppercase letter, one lowercase letter, and one number'
             });
         }
     
         // hash the password
         const saltRounds = 10;
         const hashedPassword = await bcrypt.hash(password, saltRounds);
-        console.log(req.body);       
+
+        const exisitingUser = await findUserByEmailOrUsername(email);
+        if ( exisitingUser ) {
+            return res.status(409).json({
+                success: false,
+                message: 'User with this email or username already exists'
+            });
+        }
+
+        const userData = {
+            first_name,
+            last_name,
+            user_name,
+            phone,
+            email,
+            password: hashedPassword,
+            image_url,
+            role: 'User',
+            is_active: true,
+            email_verified: false,
+        };
+
+        const newUser = await createUser(userData);
+
+        const token = generateJWT( newUser.id, newUser.email, newUser.role );
+
+        const userResponse = {
+            id: newUser.id,
+            first_name: newUser.first_name,
+            last_name: newUser.last_name,
+            full_name: newUser.full_name,
+            user_name: newUser.user_name,
+            email: newUser.email,
+            role: newUser.role,
+            is_active: newUser.is_active,
+            email_verified: newUser.email_verified
+        };
+
+        res.status(201).json({
+            success: true,
+            message: 'User registered successfully',
+            data: {
+                user: userResponse,
+                token,
+                token_type: 'Bearer',
+                expires_in: process.env.JWT_EXPIRE || '7d'
+            }
+        });
+
     } catch (error) {
         console.error("Error registering user:", error);
         return res.status(400).json({
             status: 'fail',
             message: 'Unable to register user',
+            error: error.message,
         });
     }
 };
@@ -32,27 +137,73 @@ const register = async (req, res) => {
 // @access  Public
 // user login routes
 const login = async (req, res) => {
-    
     try {
-        const { email , password } = req.body;
+        const { email_or_username, password } = req.body;
     
-        if (!email || !password) {
+        if ( !email_or_username || !password ) {
             res.status(400).json({
                 error: true,
                 message: 'All fields are required !',
             });
         }
+
+        const user = await findUserByEmailOrUsername( email_or_username );
+        if ( !user ) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid credentials'
+            });
+        }
+
+        if ( !user.is_active ) {
+            return res.status(401).json({
+                success: false,
+                message: 'Account is deactivated. Please contact administrator'
+            });
+        }
+
+        const isPasswordValid = await verifyPassword(password, user.password);
+        if ( !isPasswordValid ) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid credentials'
+            });
+        }
+
+        await updateUserLastLogin(user.id);
+
+        const token = generateJWT( user.id, user.email, user.role );
+
+        const userResponse = {
+            id: user.id,
+            first_name: user.first_name,
+            last_name: user.last_name,
+            full_name: user.full_name,
+            user_name: user.user_name,
+            email: user.email,
+            role: user.role,
+            is_active: user.is_active,
+            email_verified: user.email_verified,
+            last_login: new Date().toISOString()
+        };
     
-        console.log(req.body);
         return res.status(200).json({
             status: 'success',
             message: 'Login successful',
-        });        
+            data: {
+                user: userResponse,
+                token,
+                token_type: 'Bearer',
+                expires_in: process.env.JWT_EXPIRE || '7d',
+            },
+        });
+
     } catch (error) {
         console.error("Error logging in user:", error);
-        return res.status(400).json({
+        return res.status(500).json({
             status: 'fail',
-            message: 'Unable to login user',
+            message: 'Internal Server Error',
+            error: error.message,
         });
     }
 };
@@ -62,27 +213,40 @@ const login = async (req, res) => {
 // @access  Public
 const signOut = (req, res) => {
     try {
-        const clearCookie = () => { 
-            res.cookie('jwt', 'loggedOut', {
-                expires: new Date(Date.now() + 10 + 1000),
-                httpOnly: true,
-                secure: { [req.secure|| req.headers[ 'x-forwarded-pronto' ] === 'https' ] : true },
-                sameSite: 'strict',
-            });
-        };
+        // const clearCookie = () => { 
+        //     res.cookie('jwt', 'loggedOut', {
+        //         expires: new Date(Date.now() + 10 + 1000),
+        //         httpOnly: true,
+        //         secure: { [req.secure|| req.headers[ 'x-forwarded-pronto' ] === 'https' ] : true },
+        //         sameSite: 'strict',
+        //     });
+        // };
     
-        if (clearCookie) {
-            res.status(200).json({
-                status: 'success',
-                message: 'User signed out successfully',
-            });
+        // if (clearCookie) {
+        //     res.status(200).json({
+        //         status: 'success',
+        //         message: 'User signed out successfully',
+        //     });
+        // }
+
+        if ( req.user ) {
+            console.log(`User ${req.user.id} (${req.user.email}) logged out at ${new Date().toISOString()}`);
         }
+
+        res.status(200).json({
+            success: true,
+            message: 'Logout successful',
+            data: {
+                logged_out_at: new Date().toISOString()
+            }
+        });
         
     } catch (error) {
-        console.error("Error signing up user:", error);
-        return res.status(400).json({
-            status: 'fail',
-            message: 'Unable to sign out user',
+        console.error('Error logging out user:', error.message);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
         });
     }
 };
