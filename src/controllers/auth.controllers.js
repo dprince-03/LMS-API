@@ -211,7 +211,7 @@ const login = async (req, res) => {
 // @desc    Logout user
 // @route   POST
 // @access  Public
-const signOut = (req, res) => {
+const logout = (req, res) => {
     try {
         // const clearCookie = () => { 
         //     res.cookie('jwt', 'loggedOut', {
@@ -251,8 +251,145 @@ const signOut = (req, res) => {
     }
 };
 
+const getMe = async (req, res) => {
+    try {
+        if ( !req.user ) {
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication failed',
+            });
+        }
+
+        const userResponse = {
+             id: req.user.id,
+            first_name: req.user.first_name,
+            last_name: req.user.last_name,
+            full_name: req.user.full_name,
+            user_name: req.user.user_name,
+            email: req.user.email,
+            role: req.user.role,
+            is_active: req.user.is_active,
+            email_verified: req.user.email_verified,
+            last_login: req.user.last_login,
+            created_at: req.user.created_at
+        };
+
+        res.status(200).json({
+            success: true,
+            message: 'User profile retrieved successfully',
+            data: userResponse,
+        });
+
+    } catch (error) {
+        console.error(`Error getting user profile: ${error.message}`);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal Server Error',
+            error: error.message,
+        });
+    }
+};
+
+const refreshToken = async (req, res) => {
+    try {
+        if ( !req.user ) {
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication required'
+            });
+        }
+
+        const token = generateJWT(req.user.id, req.user.email, req.user.role);
+
+        res.status(200).json({
+            success: false,
+            message: 'Token refreshed successfully',
+            data: {
+                token,
+                token_type: 'Bearer',
+                expires_in: process.env.JWT_EXPIRE || '7d',
+            },
+        });
+
+    } catch (error) {
+        console.error('Error refreshing token:', error.message);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+const changePassword = async (req, res) => {
+    try {
+        const { current_password, new_password } = req.body;
+
+        // This endpoint requires authentication middleware
+        if (!req.user) {
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication required'
+            });
+        }
+
+        // Validate required fields
+        if (!current_password || !new_password) {
+            return res.status(400).json({
+                success: false,
+                message: 'Current password and new password are required'
+            });
+        }
+
+        // Validate new password strength
+        if (new_password.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: 'New password must be at least 6 characters long'
+            });
+        }
+
+        // Verify current password
+        const isCurrentPasswordValid = await verifyPassword(current_password, req.user.password);
+        if (!isCurrentPasswordValid) {
+            return res.status(400).json({
+                success: false,
+                message: 'Current password is incorrect'
+            });
+        }
+
+        // Don't allow same password
+        if (current_password === new_password) {
+            return res.status(400).json({
+                success: false,
+                message: 'New password must be different from current password'
+            });
+        }
+
+        // Update password
+        const { updateUserById } = require('../models/users.model');
+        await updateUserById(req.user.id, { password: new_password });
+
+        res.status(200).json({
+            success: true,
+            message: 'Password changed successfully'
+        });
+
+    } catch (error) {
+        console.error('Error changing password:', error.message);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
 module.exports = {
     register,
     login,
-    signOut,
+    logout,
+    getMe,
+    refreshToken,
+    changePassword,
 };
