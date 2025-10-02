@@ -54,7 +54,7 @@ const register = async (req, res) => {
         }
 
         if ( password.length < 8 ) {
-            res.status(400).json({
+            return res.status(400).json({
                 success: false,
                 message: 'Password must be at least 6 characters long',
             });
@@ -141,7 +141,7 @@ const login = async (req, res) => {
         const { email_or_username, password } = req.body;
     
         if ( !email_or_username || !password ) {
-            res.status(400).json({
+            return res.status(400).json({
                 error: true,
                 message: 'All fields are required !',
             });
@@ -187,7 +187,7 @@ const login = async (req, res) => {
             last_login: new Date().toISOString()
         };
     
-        return res.status(200).json({
+        res.status(200).json({
             status: 'success',
             message: 'Login successful',
             data: {
@@ -243,7 +243,7 @@ const logout = (req, res) => {
         
     } catch (error) {
         console.error('Error logging out user:', error.message);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: 'Internal server error',
             error: error.message
@@ -377,7 +377,7 @@ const changePassword = async (req, res) => {
 
     } catch (error) {
         console.error('Error changing password:', error.message);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: 'Internal server error',
             error: error.message
