@@ -1,9 +1,9 @@
 
-const { testConnection } = require('./src/config/database.config');
+const { testConnection } = require('../../src/config/database.config');
 // const { authors, books, users } = require('./src/models');
-const authors = require('./src/models/authors.model');
-const users = require('./src/models/users.model');
-const books = require('./src/models/books.model');
+const authors = require('../../src/models/authors.model');
+const users = require('../../src/models/users.model');
+const books = require('../../src/models/books.model');
 
 const testModels = async () => {
     await testConnection();
