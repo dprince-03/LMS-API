@@ -376,8 +376,6 @@ const deleteBooksById = async (req, res) => {
         });
     }
 };
-const borrowBooks = async (req, res) => {};
-const returnBooks = async (req, res) => {};
 
 module.exports = {
     createBooks,
@@ -385,6 +383,4 @@ module.exports = {
     getBooksById,
     updateBooksById,
     deleteBooksById,
-    borrowBooks,
-    returnBooks,
 };
