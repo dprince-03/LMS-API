@@ -8,11 +8,13 @@ const {
     createBorrowRecord, 
     findAllBorrowRecords,
     updateOverdueBorrowRecords,
+    countBorrowRecords,
 } = require("../models/borrowedRecords.model");
 
 const { 
     canUserBorrowMore, 
-    getUserActiveBorrowedCount 
+    getUserActiveBorrowedCount, 
+    findUserById
 } = require("../models/users.model");
 
 
@@ -217,7 +219,7 @@ const returnBook = async (req, res) => {
     }
 }
 
-const getAllBorrowRecords = async (req, res) => {
+const getAllBorrowRecord = async (req, res) => {
     try {
         const {
             page = 1,
@@ -281,3 +283,252 @@ const getAllBorrowRecords = async (req, res) => {
         });
     }
 }
+
+const getUserBorrowRecord = async (req, res) => {
+    try {
+        const { id: userId } = req.params;
+        const {
+            page = 1,
+            limit = 10,
+            status,
+        } = req.query;
+
+        if ( !userId || isNaN(userId) ) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid user ID is required'
+            });
+        }
+
+        const user = await findUserById(parseInt(userId));
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        if ( req.user.role !== 'Admin' && req.user.role !== 'Librarian' && req.user.id !== parseInt(userId) ) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied. You can only view your own borrow records'
+            });
+        }
+
+        const offset = (parseInt(page) - 1) * parseInt(limit);
+
+        const options = {
+            limit: parseInt(limit),
+            offset,
+            user_id: parseInt(userId)
+        };
+
+        if (status) {
+            options.status = status;
+        }
+
+        const borrowRecords = await findAllBorrowRecords(options);
+
+        // Get total count
+        const totalRecords = await countBorrowRecords({ user_id: parseInt(userId), status });
+        const totalPages = Math.ceil(totalRecords / parseInt(limit));
+
+        // Get user statistics
+        const activeBorrows = await getUserActiveBorrowedCount(parseInt(userId));
+
+        res.status(200).json({
+            success: true,
+            message: 'User borrow records retrieved successfully',
+            data: {
+                user: {
+                    id: user.id,
+                    full_name: user.full_name,
+                    email: user.email,
+                    active_borrows: activeBorrows
+                },
+                records: borrowRecords,
+                statistics: {
+                    total_borrows: totalRecords,
+                    active_borrows: activeBorrows,
+                    can_borrow_more: await canUserBorrowMore(parseInt(userId))
+                }
+            },
+            pagination: {
+                current_page: parseInt(page),
+                total_pages: totalPages,
+                total_items: totalRecords,
+                items_per_page: parseInt(limit)
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching user borrow records:', error.message);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+}
+
+const getOverdueRecords = async (req, res) => {
+	try {
+		const { page = 1, limit = 20 } = req.query;
+
+		// Calculate offset
+		const offset = (parseInt(page) - 1) * parseInt(limit);
+
+		// Update overdue status first
+		const updatedCount = await updateOverdueBorrowRecords();
+		console.log(`Updated ${updatedCount} records to overdue status`);
+
+		// Get overdue records
+		const overdueRecords = await getOverdueBorrowRecords({
+			limit: parseInt(limit),
+			offset,
+		});
+
+		// Get total count
+		const totalOverdue = await countBorrowRecords({ overdue_only: true });
+		const totalPages = Math.ceil(totalOverdue / parseInt(limit));
+
+		res.status(200).json({
+			success: true,
+			message: "Overdue records retrieved successfully",
+			data: overdueRecords,
+			pagination: {
+				current_page: parseInt(page),
+				total_pages: totalPages,
+				total_items: totalOverdue,
+				items_per_page: parseInt(limit),
+			},
+			summary: {
+				total_overdue_books: totalOverdue,
+				updated_records: updatedCount,
+			},
+		});
+	} catch (error) {
+		console.error("Error fetching overdue records:", error.message);
+		res.status(500).json({
+			success: false,
+			message: "Internal server error",
+			error: error.message,
+		});
+	}
+};
+
+// Extend due date - POST /borrow-records/:id/extend
+const extendDueDate = async (req, res) => {
+	try {
+		const { id: recordId } = req.params;
+		const { extension_days = 7 } = req.body;
+
+		// Validate record ID
+		if (!recordId || isNaN(recordId)) {
+			return res.status(400).json({
+				success: false,
+				message: "Valid borrow record ID is required",
+			});
+		}
+
+		// Get borrow record
+		const borrowRecord = await findBorrowRecordById(parseInt(recordId));
+		if (!borrowRecord) {
+			return res.status(404).json({
+				success: false,
+				message: "Borrow record not found",
+			});
+		}
+
+		// Authorization: only allow user to extend their own records, or admin/librarian
+		if (
+			req.user.role !== "Admin" &&
+			req.user.role !== "Librarian" &&
+			req.user.id !== borrowRecord.user_id
+		) {
+			return res.status(403).json({
+				success: false,
+				message: "Access denied. You can only extend your own borrow records",
+			});
+		}
+
+		// Check if book is already returned
+		if (borrowRecord.return_date) {
+			return res.status(400).json({
+				success: false,
+				message: "Cannot extend due date for returned book",
+			});
+		}
+
+		// Calculate new due date
+		const currentDueDate = new Date(borrowRecord.due_date);
+		const newDueDate = new Date(currentDueDate);
+		newDueDate.setDate(newDueDate.getDate() + parseInt(extension_days));
+
+		// Extend due date
+		const updatedRecord = await extendBorrowRecordDueDate(
+			parseInt(recordId),
+			newDueDate
+		);
+
+		res.status(200).json({
+			success: true,
+			message: "Due date extended successfully",
+			data: {
+				borrow_record: updatedRecord,
+				extension: {
+					previous_due_date: currentDueDate.toISOString(),
+					new_due_date: newDueDate.toISOString(),
+					extension_days: parseInt(extension_days),
+				},
+			},
+		});
+	} catch (error) {
+		console.error("Error extending due date:", error.message);
+		res.status(500).json({
+			success: false,
+			message: "Internal server error",
+			error: error.message,
+		});
+	}
+};
+
+// Get borrowing statistics - GET /borrow-records/statistics
+const getBorrowingStats = async (req, res) => {
+	try {
+		// Only admin and librarian can view statistics
+		if (req.user.role !== "Admin" && req.user.role !== "Librarian") {
+			return res.status(403).json({
+				success: false,
+				message: "Access denied. Admin or Librarian role required",
+			});
+		}
+
+		const stats = await getBorrowingStatistics();
+
+		res.status(200).json({
+			success: true,
+			message: "Borrowing statistics retrieved successfully",
+			data: {
+				...stats,
+				generated_at: new Date().toISOString(),
+			},
+		});
+	} catch (error) {
+		console.error("Error fetching borrowing statistics:", error.message);
+		res.status(500).json({
+			success: false,
+			message: "Internal server error",
+			error: error.message,
+		});
+	}
+};
+
+module.exports = {
+	borrowBook,
+	returnBook,
+	getAllBorrowRecord,
+	getUserBorrowRecord,
+	getOverdueRecords,
+	extendDueDate,
+	getBorrowingStats,
+};
