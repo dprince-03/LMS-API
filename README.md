@@ -111,15 +111,51 @@ The system uses 4 main tables:
 | PUT    | /api/authors/:id | Update author    | Admin/Librarian |
 | DELETE | /api/authors/:id | Delete author    | Admin/Librarian |
 
+### Books
+
+| Method | Endpoint              | Description                | Access          |
+| ------ | --------------------- | -------------------------- | --------------- |
+| GET    | /api/books            | Get all books with filters | Public          |
+| GET    | /api/books/:id        | Get book by ID             | Public          |
+| POST   | /api/books            | Create book                | Admin/Librarian |
+| PUT    | /api/books/:id        | Update book                | Admin/Librarian |
+| DELETE | /api/books/:id        | Delete book                | Admin/Librarian |
+| POST   | /api/books/:id/borrow | Borrow a book              | Authenticated   |
+| POST   | /api/books/:id/return | Return a book              | Authenticated   |
+
+### Users
+
+| Method | Endpoint                      | Description              | Access              |
+| ------ | ----------------------------- | ------------------------ | ------------------- |
+| GET    | /api/users                    | Get all users            | Admin               |
+| GET    | /api/users/public             | Get public users list    | Public              |
+| GET    | /api/users/profile            | Get current user profile | Protected           |
+| GET    | /api/users/:id                | Get user by ID           | Admin/Librarian/Own |
+| GET    | /api/users/:id/borrow-records | Get user borrow records  | Protected           |
+| POST   | /api/users                    | Create user              | Admin               |
+| PUT    | /api/users/:id                | Update user              | Admin/Own           |
+| DELETE | /api/users/:id                | Delete user              | Admin               |
+
+### Borrow Records
+
+| col1 | Endpoint                       | Description            | Access               |
+| ---- | ------------------------------ | ---------------------- | -------------------- |
+| GET  | /api/borrow-records            | Get all borrow records | Admin/Librarian      |
+| GET  | /api/borrow-records/overdue    | Get overdue records    | Admin/Librarian      |
+| GET  | /api/borrow-records/statistics | Get borrowing stats    | Admin/Librarian      |
+| POST | /api/borrow-records/:id/extend | Extend due date        | User/Admin/Librarian |
 
 ## **🔐 Authentication**
+
 All protected endpoints require a JWT token in the Authorization header:
+
 ```
 Authorization: Bearer <your_jwt_token>
 ```
 
 ## Example Login Request
-``` 
+
+```
 curl -X POST http://localhost:5080/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{
@@ -129,7 +165,9 @@ curl -X POST http://localhost:5080/api/auth/login \
 ```
 
 ## **👥 Role-Based Access**
+
 ### Admin
+
 - Full system access
 - User management (CRUD operations)
 - Book and author management
@@ -137,6 +175,7 @@ curl -X POST http://localhost:5080/api/auth/login \
 - System configuration
 
 ### Librarian
+
 - Book and author management
 - View and update user profiles
 - Manage borrow records
@@ -144,22 +183,26 @@ curl -X POST http://localhost:5080/api/auth/login \
 - Cannot delete users or modify system settings
 
 ### User
+
 - Browse books and authors
 - Borrow and return books
 - View own borrow history
 - Update own profile
 - Cannot access admin features
 
-
 ## **🔍 Query Parameters**
+
 ### Pagination
+
 - **page** - Page number (default: 1)
 - **limit** - Items per page (default: 10, max: 100)
 
 ### Search
+
 - **search** - Search query string across relevant fields
 
 ### Filters
+
 - **status** - Filter by status (Available, Borrowed, Overdue, etc.)
 - **author_id** - Filter books by author
 - **genre** - Filter books by genre
@@ -168,13 +211,15 @@ curl -X POST http://localhost:5080/api/auth/login \
 - **overdue_only** - Filter for overdue records only
 
 ### Example
-``` bash
+
+```bash
 GET /api/books?page=1&limit=20&search=harry&genre=Fantasy&status=Available
 ```
 
-
 ## **📋 Business Rules**
+
 ### Borrowing System
+
 - Maximum 5 books per user simultaneously
 - Default loan period: 14 days (configurable)
 - Cannot borrow same book twice simultaneously
@@ -182,12 +227,14 @@ GET /api/books?page=1&limit=20&search=harry&genre=Fantasy&status=Available
 - Users must have active account status
 
 ### Returns & Overdue
+
 - Late fee: $1 per day after due date
 - Book becomes available immediately after return
 - Overdue status automatically updated
 - Due dates can be extended (once per borrow)
 
 ### Validation Rules
+
 - Email must be unique and valid format
 - ISBN must be unique
 - Password minimum 8 characters with complexity requirements
@@ -195,19 +242,23 @@ GET /api/books?page=1&limit=20&search=harry&genre=Fantasy&status=Available
 - Required fields enforced on all models
 
 ## **🛡️ Security Features**
+
 ### Rate Limiting
+
 - **Guest**: 20 requests/15 minutes
 - **User**: 60 requests/15 minutes
 - **Librarian**: 120 requests/15 minutes
 - **Admin**: 300 requests/15 minutes
 
 ### Input Sanitization
+
 - XSS protection
 - SQL injection prevention
 - HTML tag removal
 - Parameter validation
 
 ### Security Headers
+
 - **X-Frame-Options: DENY**
 - **X-Content-Type-Options: nosniff**
 - **X-XSS-Protection: 1; mode=block**
@@ -215,7 +266,9 @@ GET /api/books?page=1&limit=20&search=harry&genre=Fantasy&status=Available
 - **Content Security Policy**
 
 ## **❌ Error Responses**
+
 All error responses follow this format:
+
 ```
 {
   "success": false,
@@ -226,6 +279,7 @@ All error responses follow this format:
 ```
 
 ### HTTP Status Codes
+
 - **200** - Success
 - **201** - Created
 - **400** - Bad Request / Validation Error
@@ -236,10 +290,10 @@ All error responses follow this format:
 - **429** - Too Many Requests
 - **500** - Internal Server Error
 
-
 ## 🚀 Quick Start
 
 ### 1. Initial Setup
+
 ```
 # Clone and install
 git clone <repository>
@@ -256,6 +310,7 @@ npm run dev
 ```
 
 ### 2. Create Admin User
+
 ```
 # Use the setup key from your .env file
 curl -X POST http://localhost:5080/api/auth/setup-admin \
@@ -268,7 +323,8 @@ curl -X POST http://localhost:5080/api/auth/setup-admin \
 ```
 
 ### 3. Test the API
-```  
+
+```
 # Login as admin
 curl -X POST <http://localhost:5080/api/auth/login> \
   -H "Content-Type: application/json" \
@@ -284,6 +340,7 @@ curl -X GET <http://localhost:5080/api/auth/me> \
 ```
 
 ## **📁 Project Structure**
+
 ```
 LMS-API/
 ├── src/
@@ -319,6 +376,7 @@ LMS-API/
 ```
 
 ## **🧪 Development**
+
 ```
 # Run in development mode with auto-reload
 npm run dev
@@ -331,7 +389,9 @@ node generate-secrets.js
 ```
 
 ## **📝 Example Requests**
+
 ### User Registration
+
 ```
 curl -X POST http://localhost:5080/api/auth/register \
   -H "Content-Type: application/json" \
@@ -345,6 +405,7 @@ curl -X POST http://localhost:5080/api/auth/register \
 ```
 
 ### Create Book
+
 ```
 curl -X POST http://localhost:5080/api/books \
   -H "Authorization: Bearer YOUR_TOKEN" \
@@ -360,6 +421,7 @@ curl -X POST http://localhost:5080/api/books \
 ```
 
 ### Borrow Book
+
 ```
 curl -X POST http://localhost:5080/api/books/1/borrow \
   -H "Authorization: Bearer YOUR_TOKEN" \
@@ -369,14 +431,16 @@ curl -X POST http://localhost:5080/api/books/1/borrow \
   }'
 ```
 
-
 ## 🤝 Contributing
+
 - Fork the repository
-- Create your feature branch (git checkout -b feature/AmazingFeature)
-- Commit your changes (git commit -m 'Add some AmazingFeature')
-- Push to the branch (git push origin feature/AmazingFeature)
+- Create your feature branch **(git checkout -b feature/AmazingFeature)**
+- Commit your changes **(git commit -m 'Add some AmazingFeature')**
+- Push to the branch **(git push origin feature/AmazingFeature)**
 - Open a Pull Request
 
 <!-- # contact:  -->
+
 <!-- **Adejare Adedayo** - princeadedayo03@gmail.com -->
+
 <!-- ### **whatsapp or telegram :**  09083497555 -->
