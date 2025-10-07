@@ -144,6 +144,6 @@ vite.config.ts.timestamp-*
 generate-jwtsecrets.js
 generate-secrets.js
 
-/test*
-/test/dummy test/test-auth.js
-/test/dummy test/test-models.js
+# 
+test/dummy test/test-auth.js
+test/dummy test/test-models.js
