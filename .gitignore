@@ -138,3 +138,12 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# secrets folder & files
+/secrets*
+generate-jwtsecrets.js
+generate-secrets.js
+
+/test*
+/test/dummy test/test-auth.js
+/test/dummy test/test-models.js

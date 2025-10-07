@@ -14,8 +14,23 @@ const hashPassword = async (password) => {
 // Verify password
 const verifyPassword = async (plainPassword, hashedPassword) => {
 	try {
-		return await bcrypt.compare(plainPassword, hashedPassword);
+		console.log("🔐 Password Verification Debug:");// remove later
+        console.log("   Plain password:", plainPassword);// remove later
+        console.log("   Hashed password prefix:", hashedPassword ? hashedPassword.substring(0, 50) + "..." : "Missing");// remove later
+
+		// ✅ Add validation for required arguments
+		if (!plainPassword || !hashedPassword) {
+			throw new Error(
+				"Both plainPassword and hashedPassword arguments are required"
+			);
+		} //remove later
+
+		const result = await bcrypt.compare(plainPassword, hashedPassword);
+		console.log("   Comparison result:", result); // remove later
+		
+		return result;
 	} catch (error) {
+		console.error("   Verification error:", error.message); // remove later
 		throw new Error(`Error verifying password: ${error.message}`);
 	}
 };
@@ -105,7 +120,7 @@ const findUserById = async (id) => {
 			return null;
 		}
 
-		return formatUser(rows[0]);
+		return formatUserForAuth(rows[0]); // for auth
 	} catch (error) {
 		throw new Error(`Error finding user: ${error.message}`);
 	}
@@ -117,7 +132,7 @@ const findUserByEmail = async (email) => {
 		const sql = "SELECT * FROM users WHERE email = ? AND deleted_at IS NULL";
 		const rows = await query(sql, [email]);
 
-		return rows.length > 0 ? formatUser(rows[0]) : null;
+		return rows.length > 0 ? formatUserForAuth(rows[0]) : null; // for auth
 	} catch (error) {
 		throw new Error(`Error finding user by email: ${error.message}`);
 	}
@@ -130,7 +145,7 @@ const findUserByUsername = async (username) => {
 			"SELECT * FROM users WHERE user_name = ? AND deleted_at IS NULL";
 		const rows = await query(sql, [username]);
 
-		return rows.length > 0 ? formatUser(rows[0]) : null;
+		return rows.length > 0 ? formatUserForAuth(rows[0]) : null; // For auth
 	} catch (error) {
 		throw new Error(`Error finding user by username: ${error.message}`);
 	}
@@ -139,11 +154,10 @@ const findUserByUsername = async (username) => {
 // Find user by email or username (for login)
 const findUserByEmailOrUsername = async (emailOrUsername) => {
 	try {
-		const sql =
-			"SELECT * FROM users WHERE (email = ? OR user_name = ?) AND deleted_at IS NULL";
+		const sql = "SELECT * FROM users WHERE (email = ? OR user_name = ?) AND deleted_at IS NULL";
 		const rows = await query(sql, [emailOrUsername, emailOrUsername]);
 
-		return rows.length > 0 ? formatUser(rows[0]) : null;
+		return rows.length > 0 ? formatUserForAuth(rows[0]) : null; // For auth
 	} catch (error) {
 		throw new Error(
 			`Error finding user by email or username: ${error.message}`
@@ -384,6 +398,34 @@ const formatUser = (userData) => {
 	};
 };
 
+// Format user object and add computed properties (exclude password)
+const formatUserForAuth = (userData) => {
+	if (!userData) return null;
+
+	return {
+		id: userData.id,
+		first_name: userData.first_name,
+		last_name: userData.last_name,
+		full_name: getUserFullName(userData),
+		user_name: userData.user_name,
+		phone: userData.phone,
+		email: userData.email,
+		password: userData.password,
+		image_url: userData.image_url,
+		role: userData.role,
+		is_active: userData.is_active,
+		email_verified: userData.email_verified,
+		last_login: userData.last_login,
+		created_at: userData.created_at,
+		updated_at: userData.updated_at,
+		// Role checks
+		is_admin: isUserAdmin(userData),
+		is_librarian: isUserLibrarian(userData),
+		is_member: isUserMember(userData),
+		// Note: password is included for authentication purppose
+	};
+};
+
 // Format user for public display (less sensitive data)
 const formatUserPublic = (userData) => {
 	if (!userData) return null;
@@ -420,5 +462,6 @@ module.exports = {
 	isUserMember,
 	getUserFullName,
 	formatUser,
+	formatUserForAuth,
 	formatUserPublic,
 };

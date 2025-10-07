@@ -7,7 +7,9 @@ const {
     login, 
     getMe,
     refreshToken,
-    changePassword
+    changePassword,
+    reset_password,
+    setup_admin
 } = require('../controllers/auth.controllers');
 
 const { 
@@ -34,28 +36,43 @@ authRouter.post('/login', login);
  * @route   POST /auth/logout
  * @desc    Logout user (invalidate token on client side)
  * @access  Private
- */
+*/
 authRouter.post('/logout', verifyToken, logout);
 
 /**
  * @route   GET /auth/me
  * @desc    Get current user profile
  * @access  Private
- */
+*/
 authRouter.get('/me', verifyToken, requireAuth, getMe);
 
 /**
  * @route   POST /auth/refresh
  * @desc    Refresh JWT token
  * @access  Private
- */
+*/
 authRouter.post('/refresh', verifyToken, requireAuth, refreshToken);
 
 /**
  * @route   POST /auth/change-password
  * @desc    Change user password
  * @access  Private
- */
+*/
 authRouter.post('/change-password', verifyToken, requireAuth, changePassword);
+
+/**
+ * @route   POST /auth/reset-password
+ * @desc    Reset password for testing (temporary)
+ * @access  Public
+*/
+authRouter.post('/reset-password', reset_password);
+
+/**
+ * @route   POST /auth/setup-admin
+ * @desc    Initial admin setup (first-time only)
+ * @access  Public (protected by setup key)
+*/
+authRouter.post('/setup-admin', setup_admin);
+
 
 module.exports = authRouter;
