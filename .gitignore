@@ -140,11 +140,12 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
 # secrets folder & files
-./secrets*
+secrets*
 generate-jwtsecrets.js
 generate-secrets.js
 
-# 
-test/
-test-auth.js
-test-models.js
+# todo list
+TODO.md 
+
+# igonore test 
+tests/x

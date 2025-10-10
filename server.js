@@ -21,6 +21,7 @@ const { initializeAuth } = require('./src/config/auth.config');
 const app = express();
 const PORT = process.env.PORT || 5080;
 
+
 // ========================
 //      MIDDLEWARES
 // ========================
@@ -249,3 +250,7 @@ const start_server = async () => {
 };
 
 start_server();
+
+
+// Export app for testing
+module.exports = app;
