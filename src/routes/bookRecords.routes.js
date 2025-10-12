@@ -44,6 +44,6 @@ brRouter.get('/', verifyToken, requireAuth, requireAdminOrLibrarian, getAllBorro
  * @access  Private (User for own records, Admin/Librarian for all)
  * @body    extension_days (optional, default: 7)
 */
-brRouter.get('/:id/extend', verifyToken, requireAuth, extendDueDate);
+brRouter.post('/:id/extend', verifyToken, requireAuth, extendDueDate);
 
 module.exports = brRouter;

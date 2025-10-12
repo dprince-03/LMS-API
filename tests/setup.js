@@ -34,28 +34,71 @@
 //   }
 // });
 
+// require("dotenv").config({ path: ".env.test" });
+// const {
+// 	testConnection,
+// 	closeConnection,
+// } = require("../src/config/database.config");
+
+// // Setup runs before all tests
+// beforeAll(async () => {
+// 	console.log("🔄 Setting up test environment...");
+// 	const connected = await testConnection();
+// 	if (!connected) {
+// 		throw new Error("Failed to connect to test database");
+// 	}
+// 	console.log("✅ Test database connected");
+// });
+
+// // Cleanup runs after all tests
+// afterAll(async () => {
+// 	console.log("🔄 Cleaning up test environment...");
+// 	await closeConnection();
+// 	console.log("✅ Test environment cleaned up");
+// });
+
+// // Set longer timeout for integration tests
+// jest.setTimeout(10000);
+
 require("dotenv").config({ path: ".env.test" });
-const {
-	testConnection,
-	closeConnection,
-} = require("../src/config/database.config");
 
-// Setup runs before all tests
-beforeAll(async () => {
-	console.log("🔄 Setting up test environment...");
-	const connected = await testConnection();
-	if (!connected) {
-		throw new Error("Failed to connect to test database");
-	}
-	console.log("✅ Test database connected");
-});
+// Global test timeout
+jest.setTimeout(30000);
 
-// Cleanup runs after all tests
-afterAll(async () => {
-	console.log("🔄 Cleaning up test environment...");
-	await closeConnection();
-	console.log("✅ Test environment cleaned up");
-});
+// Suppress console logs during tests (optional)
+global.console = {
+	...console,
+	log: jest.fn(),
+	error: jest.fn(),
+	warn: jest.fn(),
+	info: jest.fn(),
+};
 
-// Set longer timeout for integration tests
-jest.setTimeout(10000);
+// Global test utilities
+global.testUser = {
+	email: "test@example.com",
+	password: "TestPass123!",
+	first_name: "Test",
+	last_name: "User",
+	user_name: "testuser",
+};
+
+global.adminUser = {
+	email: "admin@example.com",
+	password: "AdminPass123!",
+	first_name: "Admin",
+	last_name: "User",
+	user_name: "adminuser",
+	role: "Admin",
+};
+
+// // Clean up after all tests
+// afterAll(async () => {
+// 	try {
+// 		const { pool } = require("../src/config/database.config");
+// 		await pool.end();
+// 		console.info("✅ Test database connections closed");
+// 	} catch (error) {
+// 		console.error("Error closing test database:", error);
+// 	}
+// });
