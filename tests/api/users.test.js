@@ -13,11 +13,11 @@
 
 //     beforeEach(async () => {
 //         await cleanupDatabase();
-        
+
 //         // Create admin and user
 //         const admin = await createTestAdmin();
 //         adminToken = admin.token;
-        
+
 //         const user = await createTestUser();
 //         userToken = user.token;
 //     });
@@ -173,86 +173,204 @@
 //     });
 // });
 
+const request = require("supertest");
+const app = require("../../src/server");
+const DBHelper = require("../helpers/test.helpers");
 
+describe("Users API", () => {
+	let adminToken;
+	let userToken;
+	let testUser;
 
-const request = require('supertest');
-const app = require('../../server');
-const DBHelper = require('../helpers/test.helpers');
+	beforeEach(async () => {
+		await DBHelper.clearDatabase();
 
-describe('Users API', () => {
-    let adminToken;
-    let userToken;
-    let testUser;
+		// Create admin user
+		await DBHelper.createTestUser(global.adminUser);
 
-    beforeAll(async () => {
-        await DBHelper.clearDatabase();
+		const adminLogin = await request(app).post("/api/auth/login").send({
+			emailOrUsername: "admin@example.com",
+			password: global.adminUser.password,
+		});
 
-        // Create admin user
-        await DBHelper.createTestUser(global.adminUser);
-    
-        const adminLogin = await request(app)
-        .post('/api/auth/login')
-        .send({
-            emailOrUsername: 'admin@example.com',
-            password: 'TestPass123!'
-        });
+		adminToken = adminLogin.body.data.token;
 
-        adminToken = adminLogin.body.data.token;
+		// Create regular user
+		testUser = await DBHelper.createTestUser(global.testUser);
 
-        // Create regular user
-        testUser = await DBHelper.createTestUser(global.testUser);
-    
-        const userLogin = await request(app)
-        .post('/api/auth/login')
-        .send({
-            emailOrUsername: 'test@example.com',
-            password: 'TestPass123!'
-        });
+		const userLogin = await request(app).post("/api/auth/login").send({
+			emailOrUsername: "test@example.com",
+			password: "TestPass123!",
+		});
 
-        userToken = userLogin.body.data.token;
-    });
+		userToken = userLogin.body.data.token;
+	});
 
-    afterEach(async () => {
-        await DBHelper.clearDatabase();
-    });
+	afterEach(async () => {
+		await DBHelper.clearDatabase();
+	});
 
-    describe('GET /api/users', () => {
-        it('should return users list for admin', async () => {
-        const response = await request(app)
-            .get('/api/users')
-            .set('Authorization', `Bearer ${adminToken}`)
-            .expect(200);
+	describe("GET /api/users", () => {
+		it("should return users list for admin", async () => {
+			const response = await request(app)
+				.get("/api/users")
+				.set("Authorization", `Bearer ${adminToken}`)
+				.expect(200);
 
-            expect(response.body.success).toBe(true);
-            expect(response.body.data).toBeInstanceOf(Array);
-        });
+			expect(response.body.success).toBe(true);
+			expect(response.body.data).toBeInstanceOf(Array);
+		});
 
-        it('should reject access for non-admin users', async () => {
-            await request(app)
-            .get('/api/users')
-            .set('Authorization', `Bearer ${userToken}`)
-            .expect(403);
-        });
-    });
+		it("should reject access for non-admin users", async () => {
+			await request(app)
+				.get("/api/users")
+				.set("Authorization", `Bearer ${userToken}`)
+				.expect(403);
+		});
+	});
 
-    describe('GET /api/users/:id', () => {
-        it('should allow user to view own profile', async () => {
-            const response = await request(app)
-            .get(`/api/users/${testUser.id}`)
-            .set('Authorization', `Bearer ${userToken}`)
-            .expect(200);
+	describe("GET /api/users/:id", () => {
+		it("should allow user to view own profile", async () => {
+			const response = await request(app)
+				.get(`/api/users/${testUser.id}`)
+				.set("Authorization", `Bearer ${userToken}`)
+				.expect(200);
 
-            expect(response.body.success).toBe(true);
-            expect(response.body.data.id).toBe(testUser.id);
-        });
+			expect(response.body.success).toBe(true);
+			expect(response.body.data.id).toBe(testUser.id);
+		});
 
-        it('should allow admin to view any user profile', async () => {
-            const response = await request(app)
-            .get(`/api/users/${testUser.id}`)
-            .set('Authorization', `Bearer ${adminToken}`)
-            .expect(200);
+		it("should allow admin to view any user profile", async () => {
+			const response = await request(app)
+				.get(`/api/users/${testUser.id}`)
+				.set("Authorization", `Bearer ${adminToken}`)
+				.expect(200);
 
-            expect(response.body.success).toBe(true);
-        });
-    });
+			expect(response.body.success).toBe(true);
+		});
+
+		it("should return 404 for a non-existent user", async () => {
+			await request(app)
+				.get("/api/users/999999")
+				.set("Authorization", `Bearer ${adminToken}`)
+				.expect(404);
+		});
+	});
+
+	describe("GET /api/users/public", () => {
+		it("should return a public users list with limited fields", async () => {
+			const response = await request(app).get("/api/users/public").expect(200);
+
+			expect(response.body.success).toBe(true);
+			expect(response.body.data[0]).not.toHaveProperty("email");
+			expect(response.body.data[0]).not.toHaveProperty("password");
+		});
+	});
+
+	describe("GET /api/users/profile", () => {
+		it("should return the caller's own profile with statistics", async () => {
+			const response = await request(app)
+				.get("/api/users/profile")
+				.set("Authorization", `Bearer ${userToken}`)
+				.expect(200);
+
+			expect(response.body.data.id).toBe(testUser.id);
+			expect(response.body.data).toHaveProperty("statistics");
+		});
+	});
+
+	describe("POST /api/users", () => {
+		it("should create a user as admin", async () => {
+			const response = await request(app)
+				.post("/api/users")
+				.set("Authorization", `Bearer ${adminToken}`)
+				.send({
+					first_name: "Created",
+					last_name: "ByAdmin",
+					user_name: "createdbyadmin",
+					email: "createdbyadmin@example.com",
+					password: "CreatedPass123",
+					role: "Librarian",
+				})
+				.expect(201);
+
+			expect(response.body.data.role).toBe("Librarian");
+		});
+
+		it("should reject creation from a non-admin user", async () => {
+			await request(app)
+				.post("/api/users")
+				.set("Authorization", `Bearer ${userToken}`)
+				.send({
+					first_name: "Nope",
+					last_name: "Nope",
+					user_name: "nopeuser",
+					email: "nope@example.com",
+					password: "NopePass123",
+				})
+				.expect(403);
+		});
+
+		it("should reject a duplicate email", async () => {
+			await request(app)
+				.post("/api/users")
+				.set("Authorization", `Bearer ${adminToken}`)
+				.send({
+					first_name: "Dup",
+					last_name: "User",
+					user_name: "dupuser",
+					email: testUser.email,
+					password: "DupPass123",
+				})
+				.expect(409);
+		});
+	});
+
+	describe("DELETE /api/users/:id", () => {
+		it("should soft-delete a user as admin", async () => {
+			const target = await DBHelper.createTestUser({
+				email: "todelete@example.com",
+				user_name: "todeleteuser",
+			});
+
+			const response = await request(app)
+				.delete(`/api/users/${target.id}`)
+				.set("Authorization", `Bearer ${adminToken}`)
+				.expect(200);
+
+			expect(response.body.success).toBe(true);
+		});
+
+		it("should reject deletion from a non-admin user", async () => {
+			await request(app)
+				.delete(`/api/users/${testUser.id}`)
+				.set("Authorization", `Bearer ${userToken}`)
+				.expect(403);
+		});
+
+		it("should reject deleting the last active admin", async () => {
+			// testUser + adminUser exist; adminUser is the only Admin.
+			const adminRecord = await request(app)
+				.get("/api/users?role=Admin")
+				.set("Authorization", `Bearer ${adminToken}`);
+			const adminId = adminRecord.body.data[0].id;
+
+			await request(app)
+				.delete(`/api/users/${adminId}`)
+				.set("Authorization", `Bearer ${adminToken}`)
+				.expect(409);
+		});
+	});
+
+	describe("GET /api/users/:id/borrow-records", () => {
+		it("should return the caller's own borrow records", async () => {
+			const response = await request(app)
+				.get(`/api/users/${testUser.id}/borrow-records`)
+				.set("Authorization", `Bearer ${userToken}`)
+				.expect(200);
+
+			expect(response.body.success).toBe(true);
+			expect(response.body.data).toHaveProperty("records");
+		});
+	});
 });

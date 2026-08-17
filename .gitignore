@@ -144,8 +144,8 @@ secrets*
 generate-jwtsecrets.js
 generate-secrets.js
 
-# todo list
-TODO.md 
+# todo list (root-level scratch only — docs/TODO.md is tracked on purpose)
+/TODO.md
 
-# igonore test 
-tests/x
+# ignore scratch test subfolder only — real test files under tests/ are tracked
+/tests/x

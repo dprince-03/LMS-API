@@ -30,10 +30,10 @@ CREATE TABLE authors (
     date_of_birth DATE DEFAULT NULL,
     biography TEXT DEFAULT NULL,
     phone VARCHAR(255) DEFAULT NULL,
-    email VARCHAR(255) DEFAULT NULL,
+    email VARCHAR(255) DEFAULT NULL UNIQUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_name (first_name, last_name),    
+    INDEX idx_name (first_name, last_name),
     INDEX idx_email (email)
 );
 

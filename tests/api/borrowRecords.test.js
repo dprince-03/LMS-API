@@ -1,5 +1,5 @@
 const request = require("supertest");
-const app = require("../../server");
+const app = require("../../src/server");
 const DBHelper = require("../helpers/test.helpers");
 
 describe("Borrow Records API", () => {
@@ -8,7 +8,7 @@ describe("Borrow Records API", () => {
 	let book;
 	let borrowRecord;
 
-	beforeAll(async () => {
+	beforeEach(async () => {
 		await DBHelper.clearDatabase();
 
 		// Create admin user
@@ -88,8 +88,9 @@ describe("Borrow Records API", () => {
 	describe("POST /api/borrow-records/:id/extend", () => {
 		beforeEach(async () => {
 			// Create a borrow record first
-			const user = await DBHelper.createTestUser({
+			await DBHelper.createTestUser({
 				email: "borrower@example.com",
+				user_name: "borroweruser",
 			});
 
 			const borrowResponse = await request(app)

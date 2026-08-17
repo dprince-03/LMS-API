@@ -1,574 +1,421 @@
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
+const {
+	createUser,
+	findUserByEmailOrUsername,
+	findUserByEmail,
+	verifyPassword,
+	updateUserLastLogin,
+	updateUserById,
+	countUsers,
+} = require("../models/users.model");
+const { authUtils, rateLimitConfig } = require("../config/auth.config");
+const { generateAccessToken, generateResetToken, verifyAppToken } = require("../utils/tokens");
+const { sendPasswordResetEmail } = require("../utils/mailer");
+const { store } = require("../utils/store");
+const logger = require("../utils/logger");
 
-const { 
-    createUser,
-    findUserByEmailOrUsername, 
-    verifyPassword,
-    updateUserLastLogin, 
-} = require('../models/users.model');
-
-
-function generateJWT (userId, email, role) {
-    return jwt.sign(
-        {
-            id: userId,
-            email,
-            role,
-        }, 
-        process.env.JWT_SECRET, 
-        {
-            expiresIn: process.env.JWT_EXPIRE || '7d',
-        }
-    );
-}
+const LOGIN_ATTEMPTS_PREFIX = "login_attempts:";
+const lockoutSeconds = Math.ceil(rateLimitConfig.loginAttempts.lockoutDuration / 1000);
 
 // @desc    Register new user
 // @access  Public
-// user registration routes
 const register = async (req, res) => {
-    try {
-        const { 
-            first_name, 
-            last_name, 
-            user_name,
-            phone,
-            email, 
-            password,
-            image_url, 
-        } = req.body;
-        
-        if ( !first_name || !last_name || !user_name || !email || !password ) {
-            return res.status(400).json({ 
-                error: true,
-                message: 'All fields are required !',
-            });
-        }
+	try {
+		const { first_name, last_name, user_name, phone, email, password, image_url } = req.body;
 
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if ( !emailRegex.test(email) ) {
-            return res.status(400).json({
-                success: false, 
-                message: 'Invalid email format',
-            });
-        }
+		const existingUser = await findUserByEmailOrUsername(email);
+		if (existingUser) {
+			return res.status(409).json({
+				success: false,
+				message: "User with this email or username already exists",
+			});
+		}
 
-        if ( password.length < 8 ) {
-            return res.status(400).json({
-                success: false,
-                message: 'Password must be at least 6 characters long',
-            });
-        }
+		const existingUsername = await findUserByEmailOrUsername(user_name);
+		if (existingUsername) {
+			return res.status(409).json({
+				success: false,
+				message: "Username is already taken",
+			});
+		}
 
-        const hasUpperCase = /[A-Z]/.test(password);
-        const hasLowerCase = /[a-z]/.test(password);
-        const hasNumber = /\d/.test(password);
+		const newUser = await createUser({
+			first_name,
+			last_name,
+			user_name,
+			phone,
+			email,
+			password,
+			image_url,
+			role: "User",
+			is_active: true,
+			email_verified: false,
+		});
 
-        if ( !hasUpperCase || !hasLowerCase || !hasNumber ) {
-            return res.status(400).json({
-                success: false,
-                message: 'Password must contain at least one uppercase letter, one lowercase letter, and one number'
-            });
-        }
-    
-        // hash the password
-        // const saltRounds = 10;
-        // const hashedPassword = await bcrypt.hash(password, saltRounds);
+		const token = generateAccessToken(newUser.id, newUser.email, newUser.role);
 
-        const exisitingUser = await findUserByEmailOrUsername(email);
-        if ( exisitingUser ) {
-            return res.status(409).json({
-                success: false,
-                message: 'User with this email or username already exists'
-            });
-        }
-
-        const userData = {
-            first_name,
-            last_name,
-            user_name,
-            phone,
-            email,
-            password,
-            image_url,
-            role: 'User',
-            is_active: true,
-            email_verified: false,
-        };
-
-        const newUser = await createUser(userData);
-
-        const token = generateJWT( newUser.id, newUser.email, newUser.role );
-
-        const userResponse = {
-            id: newUser.id,
-            first_name: newUser.first_name,
-            last_name: newUser.last_name,
-            full_name: newUser.full_name,
-            user_name: newUser.user_name,
-            email: newUser.email,
-            role: newUser.role,
-            is_active: newUser.is_active,
-            email_verified: newUser.email_verified
-        };
-
-        res.status(201).json({
-            success: true,
-            message: 'User registered successfully',
-            data: {
-                user: userResponse,
-                token,
-                token_type: 'Bearer',
-                expires_in: process.env.JWT_EXPIRE || '7d'
-            }
-        });
-
-    } catch (error) {
-        console.error("Error registering user:", error);
-        return res.status(400).json({
-            status: 'fail',
-            message: 'Unable to register user',
-            error: error.message,
-        });
-    }
+		res.status(201).json({
+			success: true,
+			message: "User registered successfully",
+			data: {
+				user: {
+					id: newUser.id,
+					first_name: newUser.first_name,
+					last_name: newUser.last_name,
+					full_name: newUser.full_name,
+					user_name: newUser.user_name,
+					email: newUser.email,
+					role: newUser.role,
+					is_active: newUser.is_active,
+					email_verified: newUser.email_verified,
+				},
+				token,
+				token_type: "Bearer",
+				expires_in: process.env.JWT_EXPIRE || "7d",
+			},
+		});
+	} catch (error) {
+		logger.error({ err: error }, "Error registering user");
+		return res.status(400).json({
+			success: false,
+			message: "Unable to register user",
+		});
+	}
 };
 
 // @desc    Login user
 // @access  Public
-// user login routes
 const login = async (req, res) => {
-    try {
-			console.log("Login request body:", req.body); // Debug log
-			console.log("Login request headers:", req.headers["content-type"]); // Debug log
-			// Check if request body exists
-			if (!req.body || Object.keys(req.body).length === 0) {
-				return res.status(400).json({
-					error: true,
-					message: "Request body is missing or empty",
-				});
-			} // remove them later
+	try {
+		const { emailOrUsername, password } = req.body;
+		const lockoutKey = `${LOGIN_ATTEMPTS_PREFIX}${emailOrUsername.toLowerCase()}`;
 
-			const { emailOrUsername, password } = req.body;
-
-			if (!emailOrUsername || !password) {
-				return res.status(400).json({
-					error: true,
-					message: "All fields are required !",
-				});
-			}
-
-			const user = await findUserByEmailOrUsername(emailOrUsername);
-			if (!user) {
-				return res.status(401).json({
-					success: false,
-					message: "Invalid credentials",
-				});
-			}
-
-			// ✅ Debug: Check if password is now available
-			console.log("User found with password:", {
-				id: user.id,
-				email: user.email,
-				hasPassword: !!user.password,
-				password: user.password
-					? `Hash: ${user.password.substring(0, 20)}...`
-					: "Missing",
-			}); // remove later
-
-			if (!user.password) {
-				return res.status(500).json({
-					success: false,
-					message: "User account error: No password set",
-				});
-			} // remove later
-
-			if (!user.is_active) {
-				return res.status(401).json({
-					success: false,
-					message: "Account is deactivated. Please contact administrator",
-				});
-			}
-
-			// ✅ CORRECT: Compare the plain text password from request with the hashed password from database
-			console.log("Verifying password for user:", user.email);
-			console.log("Stored hash:", user.password ? "Exists" : "Missing"); // remove them later
-
-			const isPasswordValid = await verifyPassword(password, user.password);
-			if (!isPasswordValid) {
-				return res.status(401).json({
-					success: false,
-					message: "Invalid credentials",
-				});
-			}
-
-			await updateUserLastLogin(user.id);
-
-			const token = generateJWT(user.id, user.email, user.role);
-
-			const userResponse = {
-				id: user.id,
-				first_name: user.first_name,
-				last_name: user.last_name,
-				full_name: user.full_name,
-				user_name: user.user_name,
-				email: user.email,
-				role: user.role,
-				is_active: user.is_active,
-				email_verified: user.email_verified,
-				last_login: new Date().toISOString(),
-			};
-
-			res.status(200).json({
-				status: "success",
-				message: "Login successful",
-				data: {
-					user: userResponse,
-					token,
-					token_type: "Bearer",
-					expires_in: process.env.JWT_EXPIRE || "7d",
-				},
+		const attempts = parseInt((await store.get(lockoutKey)) || "0", 10);
+		if (attempts >= rateLimitConfig.loginAttempts.maxAttempts) {
+			return res.status(429).json({
+				success: false,
+				message: "Too many failed login attempts. Please try again later.",
 			});
-		} catch (error) {
-        console.error("Error logging in user:", error);
-        return res.status(500).json({
-            status: 'fail',
-            message: 'Internal Server Error',
-            error: error.message,
-        });
-    }
+		}
+
+		const user = await findUserByEmailOrUsername(emailOrUsername);
+		if (!user || !user.is_active) {
+			await store.incr(lockoutKey);
+			await store.expire(lockoutKey, lockoutSeconds);
+			return res.status(401).json({
+				success: false,
+				message: "Invalid credentials",
+			});
+		}
+
+		const isPasswordValid = await verifyPassword(password, user.password);
+		if (!isPasswordValid) {
+			await store.incr(lockoutKey);
+			await store.expire(lockoutKey, lockoutSeconds);
+			return res.status(401).json({
+				success: false,
+				message: "Invalid credentials",
+			});
+		}
+
+		await store.del(lockoutKey);
+		await updateUserLastLogin(user.id);
+
+		const token = generateAccessToken(user.id, user.email, user.role);
+
+		res.status(200).json({
+			success: true,
+			message: "Login successful",
+			data: {
+				user: {
+					id: user.id,
+					first_name: user.first_name,
+					last_name: user.last_name,
+					full_name: user.full_name,
+					user_name: user.user_name,
+					email: user.email,
+					role: user.role,
+					is_active: user.is_active,
+					email_verified: user.email_verified,
+					last_login: new Date().toISOString(),
+				},
+				token,
+				token_type: "Bearer",
+				expires_in: process.env.JWT_EXPIRE || "7d",
+			},
+		});
+	} catch (error) {
+		logger.error({ err: error }, "Error logging in user");
+		return res.status(500).json({
+			success: false,
+			message: "Internal Server Error",
+		});
+	}
 };
 
-// @desc    Logout user
-// @route   POST
-// @access  Public
-const logout = (req, res) => {
-    try {
-        // const clearCookie = () => { 
-        //     res.cookie('jwt', 'loggedOut', {
-        //         expires: new Date(Date.now() + 10 + 1000),
-        //         httpOnly: true,
-        //         secure: { [req.secure|| req.headers[ 'x-forwarded-pronto' ] === 'https' ] : true },
-        //         sameSite: 'strict',
-        //     });
-        // };
-    
-        // if (clearCookie) {
-        //     res.status(200).json({
-        //         status: 'success',
-        //         message: 'User signed out successfully',
-        //     });
-        // }
+// @desc    Logout user — blacklists the current token so it can't be reused.
+// @access  Private
+const logout = async (req, res) => {
+	try {
+		if (req.user && req.token) {
+			const ttl = req.tokenExpiresAt
+				? Math.max(1, req.tokenExpiresAt - Math.floor(Date.now() / 1000))
+				: undefined;
+			await authUtils.blacklistToken(req.token, ttl);
+			logger.info({ user_id: req.user.id }, "User logged out");
+		}
 
-        if ( req.user ) {
-            console.log(`User ${req.user.id} (${req.user.email}) logged out at ${new Date().toISOString()}`);
-        }
-
-        res.status(200).json({
-            success: true,
-            message: 'Logout successful',
-            data: {
-                logged_out_at: new Date().toISOString()
-            }
-        });
-        
-    } catch (error) {
-        console.error('Error logging out user:', error.message);
-        return res.status(500).json({
-            success: false,
-            message: 'Internal server error',
-            error: error.message
-        });
-    }
+		res.status(200).json({
+			success: true,
+			message: "Logout successful",
+			data: { logged_out_at: new Date().toISOString() },
+		});
+	} catch (error) {
+		logger.error({ err: error }, "Error logging out user");
+		return res.status(500).json({
+			success: false,
+			message: "Internal server error",
+		});
+	}
 };
 
 const getMe = async (req, res) => {
-    try {
-        if ( !req.user ) {
-            return res.status(401).json({
-                success: false,
-                message: 'Authentication failed',
-            });
-        }
+	try {
+		if (!req.user) {
+			return res.status(401).json({ success: false, message: "Authentication failed" });
+		}
 
-        const userResponse = {
-             id: req.user.id,
-            first_name: req.user.first_name,
-            last_name: req.user.last_name,
-            full_name: req.user.full_name,
-            user_name: req.user.user_name,
-            email: req.user.email,
-            role: req.user.role,
-            is_active: req.user.is_active,
-            email_verified: req.user.email_verified,
-            last_login: req.user.last_login,
-            created_at: req.user.created_at
-        };
+		const { password: _password, ...userResponse } = req.user;
 
-        res.status(200).json({
-            success: true,
-            message: 'User profile retrieved successfully',
-            data: userResponse,
-        });
-
-    } catch (error) {
-        console.error(`Error getting user profile: ${error.message}`);
-        return res.status(500).json({
-            success: false,
-            message: 'Internal Server Error',
-            error: error.message,
-        });
-    }
+		res.status(200).json({
+			success: true,
+			message: "User profile retrieved successfully",
+			data: userResponse,
+		});
+	} catch (error) {
+		logger.error({ err: error }, "Error getting user profile");
+		return res.status(500).json({
+			success: false,
+			message: "Internal Server Error",
+		});
+	}
 };
 
 const refreshToken = async (req, res) => {
-    try {
-        if ( !req.user ) {
-            return res.status(401).json({
-                success: false,
-                message: 'Authentication required'
-            });
-        }
+	try {
+		if (!req.user) {
+			return res.status(401).json({ success: false, message: "Authentication required" });
+		}
 
-        const token = generateJWT(req.user.id, req.user.email, req.user.role);
+		const token = generateAccessToken(req.user.id, req.user.email, req.user.role);
 
-        res.status(200).json({
-            success: false,
-            message: 'Token refreshed successfully',
-            data: {
-                token,
-                token_type: 'Bearer',
-                expires_in: process.env.JWT_EXPIRE || '7d',
-            },
-        });
-
-    } catch (error) {
-        console.error('Error refreshing token:', error.message);
-        res.status(500).json({
-            success: false,
-            message: 'Internal server error',
-            error: error.message
-        });
-    }
+		res.status(200).json({
+			success: true,
+			message: "Token refreshed successfully",
+			data: {
+				token,
+				token_type: "Bearer",
+				expires_in: process.env.JWT_EXPIRE || "7d",
+			},
+		});
+	} catch (error) {
+		logger.error({ err: error }, "Error refreshing token");
+		res.status(500).json({ success: false, message: "Internal server error" });
+	}
 };
 
 const changePassword = async (req, res) => {
-    try {
-        const { current_password, new_password } = req.body;
+	try {
+		const { current_password, new_password } = req.body;
 
-        // This endpoint requires authentication middleware
-        if (!req.user) {
-            return res.status(401).json({
-                success: false,
-                message: 'Authentication required'
-            });
-        }
+		if (!req.user) {
+			return res.status(401).json({ success: false, message: "Authentication required" });
+		}
 
-        // Validate required fields
-        if (!current_password || !new_password) {
-            return res.status(400).json({
-                success: false,
-                message: 'Current password and new password are required'
-            });
-        }
+		const isCurrentPasswordValid = await verifyPassword(current_password, req.user.password);
+		if (!isCurrentPasswordValid) {
+			return res
+				.status(400)
+				.json({ success: false, message: "Current password is incorrect" });
+		}
 
-        // Validate new password strength
-        if (new_password.length < 6) {
-            return res.status(400).json({
-                success: false,
-                message: 'New password must be at least 6 characters long'
-            });
-        }
+		await updateUserById(req.user.id, { password: new_password }, ["password"]);
 
-        // Verify current password
-        const isCurrentPasswordValid = await verifyPassword(current_password, req.user.password);
-        if (!isCurrentPasswordValid) {
-            return res.status(400).json({
-                success: false,
-                message: 'Current password is incorrect'
-            });
-        }
-
-        // Don't allow same password
-        if (current_password === new_password) {
-            return res.status(400).json({
-                success: false,
-                message: 'New password must be different from current password'
-            });
-        }
-
-        // Update password
-        const { updateUserById } = require('../models/users.model');
-        await updateUserById(req.user.id, { password: new_password });
-
-        res.status(200).json({
-            success: true,
-            message: 'Password changed successfully'
-        });
-
-    } catch (error) {
-        console.error('Error changing password:', error.message);
-        return res.status(500).json({
-            success: false,
-            message: 'Internal server error',
-            error: error.message
-        });
-    }
+		res.status(200).json({ success: true, message: "Password changed successfully" });
+	} catch (error) {
+		logger.error({ err: error }, "Error changing password");
+		return res.status(500).json({ success: false, message: "Internal server error" });
+	}
 };
 
-// testing
-const reset_password = async (req, res) => {
-    try {
-        const { email, newPassword } = req.body;
-        
-        if (!email || !newPassword) {
-            return res.status(400).json({
-                success: false,
-                message: 'Email and new password are required'
-            });
-        }
+// @desc    Request a password reset email. Always responds the same way
+//          regardless of whether the account exists, to avoid leaking which
+//          emails are registered.
+// @access  Public
+const forgotPassword = async (req, res) => {
+	try {
+		const { email } = req.body;
+		const genericResponse = {
+			success: true,
+			message: "If an account with that email exists, a password reset link has been sent.",
+		};
 
-        const { findUserByEmail, updateUserById } = require('../models/users.model');
-        
-        const user = await findUserByEmail(email);
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'User not found'
-            });
-        }
+		const user = await findUserByEmail(email);
+		if (!user || !user.is_active) {
+			return res.status(200).json(genericResponse);
+		}
 
-        // Update password (the update function will hash it automatically);
-        await updateUserById(user.id, { password: newPassword });
+		const resetToken = generateResetToken(user.id, user.email);
+		await sendPasswordResetEmail(user.email, resetToken);
 
-        res.status(200).json({
-            success: true,
-            message: 'Password reset successfully'
-        });
-
-    } catch (error) {
-        console.error('Error resetting password:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Internal server error',
-            error: error.message
-        });
-    }
+		res.status(200).json(genericResponse);
+	} catch (error) {
+		logger.error({ err: error }, "Error handling forgot-password request");
+		// Still return the generic response — don't leak internal failures.
+		res.status(200).json({
+			success: true,
+			message: "If an account with that email exists, a password reset link has been sent.",
+		});
+	}
 };
 
-// testing 
+// @desc    Complete a password reset using a token issued by forgotPassword.
+// @access  Public (requires a valid, unexpired, single-use reset token)
+const resetPassword = async (req, res) => {
+	try {
+		const { token, new_password } = req.body;
+
+		let decoded;
+		try {
+			decoded = verifyAppToken(token);
+		} catch (_error) {
+			return res
+				.status(400)
+				.json({ success: false, message: "Invalid or expired reset token" });
+		}
+
+		if (decoded.purpose !== "password_reset") {
+			return res
+				.status(400)
+				.json({ success: false, message: "Invalid or expired reset token" });
+		}
+
+		if (await authUtils.isTokenBlacklisted(token)) {
+			return res
+				.status(400)
+				.json({ success: false, message: "This reset token has already been used" });
+		}
+
+		await updateUserById(decoded.id, { password: new_password }, ["password"]);
+
+		// Single-use: blacklist immediately so the same link can't be replayed.
+		const ttl = decoded.exp ? Math.max(1, decoded.exp - Math.floor(Date.now() / 1000)) : 3600;
+		await authUtils.blacklistToken(token, ttl);
+
+		res.status(200).json({ success: true, message: "Password reset successfully" });
+	} catch (error) {
+		logger.error({ err: error }, "Error resetting password");
+		res.status(500).json({ success: false, message: "Internal server error" });
+	}
+};
+
+// @desc    Initial admin setup (first-time only)
+// @access  Public (protected by setup key)
 const setup_admin = async (req, res) => {
-    try {
-        const { 
-            admin_email, 
-            admin_password, 
-            setup_key,
-            first_name = 'System',
-            last_name = 'Administrator'
-        } = req.body;
+	try {
+		const {
+			admin_email,
+			admin_password,
+			setup_key,
+			first_name = "System",
+			last_name = "Administrator",
+		} = req.body;
 
-        // Validate required fields
-        if (!admin_email || !admin_password || !setup_key) {
-            return res.status(400).json({
-                success: false,
-                message: 'Admin email, password, and setup key are required'
-            });
-        }
+		if (!admin_email || !admin_password || !setup_key) {
+			return res.status(400).json({
+				success: false,
+				message: "Admin email, password, and setup key are required",
+			});
+		}
 
-        // Verify setup key from environment
-        if (setup_key !== process.env.INITIAL_SETUP_KEY) {
-            return res.status(401).json({
-                success: false,
-                message: 'Invalid setup key'
-            });
-        }
+		if (!process.env.INITIAL_SETUP_KEY || setup_key !== process.env.INITIAL_SETUP_KEY) {
+			return res.status(401).json({ success: false, message: "Invalid setup key" });
+		}
 
-        // Check password strength
-        if (admin_password.length < 8) {
-            return res.status(400).json({
-                success: false,
-                message: 'Password must be at least 8 characters long'
-            });
-        }
+		if (admin_password.length < 8) {
+			return res.status(400).json({
+				success: false,
+				message: "Password must be at least 8 characters long",
+			});
+		}
 
-        const hasUpperCase = /[A-Z]/.test(admin_password);
-        const hasLowerCase = /[a-z]/.test(admin_password);
-        const hasNumber = /\d/.test(admin_password);
+		const hasUpperCase = /[A-Z]/.test(admin_password);
+		const hasLowerCase = /[a-z]/.test(admin_password);
+		const hasNumber = /\d/.test(admin_password);
 
-        if (!hasUpperCase || !hasLowerCase || !hasNumber) {
-            return res.status(400).json({
-                success: false,
-                message: 'Password must contain uppercase, lowercase, and numbers'
-            });
-        }
+		if (!hasUpperCase || !hasLowerCase || !hasNumber) {
+			return res.status(400).json({
+				success: false,
+				message: "Password must contain uppercase, lowercase, and numbers",
+			});
+		}
 
-        const { createUser, countUsers, findUserByEmail } = require('../models/users.model');
+		const existingAdmin = await findUserByEmail(admin_email);
+		if (existingAdmin) {
+			return res.status(409).json({ success: false, message: "Admin user already exists" });
+		}
 
-        // Check if admin already exists
-        const existingAdmin = await findUserByEmail(admin_email);
-        if (existingAdmin) {
-            return res.status(409).json({
-                success: false,
-                message: 'Admin user already exists'
-            });
-        }
+		const userCount = await countUsers();
+		if (userCount > 0) {
+			return res.status(403).json({
+				success: false,
+				message:
+					"System already initialized. Use regular registration or contact existing admin.",
+			});
+		}
 
-        // Check if any users exist (prevent multiple admins via this endpoint)
-        const userCount = await countUsers();
-        if (userCount > 0) {
-            return res.status(403).json({
-                success: false,
-                message: 'System already initialized. Use regular registration or contact existing admin.'
-            });
-        }
+		const adminUser = await createUser({
+			first_name,
+			last_name,
+			user_name: admin_email.split("@")[0],
+			email: admin_email,
+			password: admin_password,
+			role: "Admin",
+			is_active: true,
+			email_verified: true,
+		});
 
-        // Create admin user
-        const adminData = {
-            first_name,
-            last_name,
-            user_name: admin_email.split('@')[0],
-            email: admin_email,
-            password: admin_password,
-            role: 'Admin',
-            is_active: true,
-            email_verified: true
-        };
+		logger.info({ email: admin_email }, "Admin setup completed");
 
-        const adminUser = await createUser(adminData);
-
-        // Log the setup event
-        console.log(`🔐 Admin setup completed: ${admin_email}`);
-
-        res.status(201).json({
-            success: true,
-            message: 'System administrator created successfully',
-            data: {
-                user: {
-                    id: adminUser.id,
-                    first_name: adminUser.first_name,
-                    last_name: adminUser.last_name,
-                    email: adminUser.email,
-                    role: adminUser.role
-                }
-            }
-        });
-
-    } catch (error) {
-        console.error('Admin setup error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to setup system administrator',
-            error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message
-        });
-    }
+		res.status(201).json({
+			success: true,
+			message: "System administrator created successfully",
+			data: {
+				user: {
+					id: adminUser.id,
+					first_name: adminUser.first_name,
+					last_name: adminUser.last_name,
+					email: adminUser.email,
+					role: adminUser.role,
+				},
+			},
+		});
+	} catch (error) {
+		logger.error({ err: error }, "Admin setup error");
+		res.status(500).json({
+			success: false,
+			message: "Failed to setup system administrator",
+		});
+	}
 };
 
 module.exports = {
-    register,
-    login,
-    logout,
-    getMe,
-    refreshToken,
-    changePassword,
-    reset_password,
-    setup_admin
+	register,
+	login,
+	logout,
+	getMe,
+	refreshToken,
+	changePassword,
+	forgotPassword,
+	resetPassword,
+	setup_admin,
 };

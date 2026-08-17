@@ -1,10 +1,27 @@
-const { query, queryWithTransaction } = require("../config/database.config");
+const { query, queryWithTransaction, pool } = require("../config/database.config");
+const { buildLikeParam } = require("../utils/sanitize");
+
+const UPDATABLE_FIELDS = [
+	"isbn",
+	"published_date",
+	"author_id",
+	"title",
+	"description",
+	"cover_image",
+	"genre",
+	"language",
+	"pages",
+	"publisher",
+	"available_copies",
+	"total_copies",
+	"status",
+];
 
 // Create a new book
 const createBook = async (bookData) => {
 	try {
 		const sql = `
-            INSERT INTO books (isbn, published_date, author_id, title, description, cover_image, 
+            INSERT INTO books (isbn, published_date, author_id, title, description, cover_image,
                              genre, language, pages, publisher, available_copies, total_copies, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
@@ -27,6 +44,9 @@ const createBook = async (bookData) => {
 		const result = await query(sql, params);
 		return await findBookById(result.insertId);
 	} catch (error) {
+		if (error.code === "ER_DUP_ENTRY") {
+			throw new Error("Book with this ISBN already exists");
+		}
 		throw new Error(`Error creating book: ${error.message}`);
 	}
 };
@@ -44,7 +64,7 @@ const findAllBooks = async (options = {}) => {
 		} = options;
 
 		let sql = `
-            SELECT b.*, 
+            SELECT b.*,
                    CONCAT(a.first_name, ' ', a.last_name) as author_name
             FROM books b
             LEFT JOIN authors a ON b.author_id = a.id
@@ -57,7 +77,8 @@ const findAllBooks = async (options = {}) => {
 			whereConditions.push(
 				"(b.title LIKE ? OR b.isbn LIKE ? OR CONCAT(a.first_name, ' ', a.last_name) LIKE ?)"
 			);
-			params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+			const like = buildLikeParam(search);
+			params.push(like, like, like);
 		}
 
 		if (author_id) {
@@ -79,7 +100,8 @@ const findAllBooks = async (options = {}) => {
 			sql += " WHERE " + whereConditions.join(" AND ");
 		}
 
-		sql += ` ORDER BY b.created_at DESC LIMIT ${offset}, ${limit}`;
+		sql += " ORDER BY b.created_at DESC LIMIT ? OFFSET ?";
+		params.push(limit, offset);
 
 		const rows = await query(sql, params);
 		return rows.map((row) => {
@@ -96,7 +118,7 @@ const findAllBooks = async (options = {}) => {
 const findBookById = async (id) => {
 	try {
 		const sql = `
-            SELECT b.*, 
+            SELECT b.*,
                    CONCAT(a.first_name, ' ', a.last_name) as author_name
             FROM books b
             LEFT JOIN authors a ON b.author_id = a.id
@@ -128,19 +150,22 @@ const findBookByISBN = async (isbn) => {
 	}
 };
 
-// Update book
+// Update book. Only literal, allowlisted column names are ever interpolated
+// into the SQL — unknown keys in `updateData` are silently dropped.
 const updateBookById = async (id, updateData) => {
 	try {
 		const fields = [];
 		const params = [];
 
-		// Build dynamic update query
-		Object.keys(updateData).forEach((key) => {
-			if (updateData[key] !== undefined && key !== "id") {
+		for (const key of UPDATABLE_FIELDS) {
+			if (
+				Object.prototype.hasOwnProperty.call(updateData, key) &&
+				updateData[key] !== undefined
+			) {
 				fields.push(`${key} = ?`);
 				params.push(updateData[key]);
 			}
-		});
+		}
 
 		if (fields.length === 0) {
 			throw new Error("No fields to update");
@@ -152,6 +177,9 @@ const updateBookById = async (id, updateData) => {
 		await query(sql, params);
 		return await findBookById(id);
 	} catch (error) {
+		if (error.code === "ER_DUP_ENTRY") {
+			throw new Error("Book with this ISBN already exists");
+		}
 		throw new Error(`Error updating book: ${error.message}`);
 	}
 };
@@ -185,7 +213,7 @@ const getBookAuthor = async (bookId) => {
 const getBookBorrowRecords = async (bookId) => {
 	try {
 		const sql = `
-            SELECT br.*, u.first_name as user_first_name, u.last_name as user_last_name, 
+            SELECT br.*, u.first_name as user_first_name, u.last_name as user_last_name,
                    u.user_name, u.email as user_email
             FROM borrow_records br
             JOIN users u ON br.user_id = u.id
@@ -194,7 +222,7 @@ const getBookBorrowRecords = async (bookId) => {
         `;
 		const rows = await query(sql, [bookId]);
 
-		const { formatBorrowRecord } = require("./borrowRecords.model");
+		const { formatBorrowRecord } = require("./borrowedRecords.model");
 		return rows.map((row) => {
 			const record = formatBorrowRecord(row);
 			record.user_first_name = row.user_first_name;
@@ -212,8 +240,8 @@ const getBookBorrowRecords = async (bookId) => {
 const isBookCurrentlyBorrowed = async (bookId) => {
 	try {
 		const sql = `
-            SELECT COUNT(*) as count 
-            FROM borrow_records 
+            SELECT COUNT(*) as count
+            FROM borrow_records
             WHERE book_id = ? AND return_date IS NULL AND status = 'Borrowed'
         `;
 		const rows = await query(sql, [bookId]);
@@ -231,8 +259,7 @@ const borrowBook = async (bookId, userId, dueDate) => {
 			throw new Error("Book is not available for borrowing");
 		}
 
-		const connection =
-			await require("../config/database.config").pool.getConnection();
+		const connection = await pool.getConnection();
 
 		try {
 			await connection.beginTransaction();
@@ -269,8 +296,7 @@ const borrowBook = async (bookId, userId, dueDate) => {
 // Return book (increase available copies)
 const returnBook = async (bookId, userId) => {
 	try {
-		const connection =
-			await require("../config/database.config").pool.getConnection();
+		const connection = await pool.getConnection();
 
 		try {
 			await connection.beginTransaction();
@@ -320,11 +346,8 @@ const countBooks = async (filters = {}) => {
 			whereConditions.push(
 				"(b.title LIKE ? OR b.isbn LIKE ? OR CONCAT(a.first_name, ' ', a.last_name) LIKE ?)"
 			);
-			params.push(
-				`%${filters.search}%`,
-				`%${filters.search}%`,
-				`%${filters.search}%`
-			);
+			const like = buildLikeParam(filters.search);
+			params.push(like, like, like);
 		}
 
 		if (filters.author_id) {
@@ -385,6 +408,7 @@ const formatBook = (bookData) => {
 };
 
 module.exports = {
+	UPDATABLE_FIELDS,
 	createBook,
 	findAllBooks,
 	findBookById,

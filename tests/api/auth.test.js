@@ -194,9 +194,8 @@
 //     });
 // });
 
-
 const request = require("supertest");
-const app = require("../../server");
+const app = require("../../src/server");
 const DBHelper = require("../helpers/test.helpers");
 
 describe("Authentication API", () => {
@@ -286,6 +285,83 @@ describe("Authentication API", () => {
 
 			expect(response.body.success).toBe(false);
 		});
+
+		it("should reject a duplicate username with a different email", async () => {
+			await request(app).post("/api/auth/register").send({
+				first_name: "First",
+				last_name: "User",
+				user_name: "sharedname",
+				email: "first@example.com",
+				password: "TestPass123!",
+			});
+
+			const response = await request(app)
+				.post("/api/auth/register")
+				.send({
+					first_name: "Second",
+					last_name: "User",
+					user_name: "sharedname",
+					email: "second@example.com",
+					password: "TestPass123!",
+				})
+				.expect(409);
+
+			expect(response.body.success).toBe(false);
+			expect(response.body.message).toContain("Username");
+		});
+	});
+
+	describe("Malformed Authorization header", () => {
+		it("rejects a header without the Bearer prefix", async () => {
+			await request(app).get("/api/auth/me").set("Authorization", "sometoken").expect(401);
+		});
+
+		it("rejects an empty Authorization header", async () => {
+			await request(app).get("/api/auth/me").set("Authorization", "").expect(401);
+		});
+	});
+
+	describe("POST /api/auth/setup-admin", () => {
+		it("rejects an incorrect setup key", async () => {
+			const response = await request(app)
+				.post("/api/auth/setup-admin")
+				.send({
+					admin_email: "newadmin@example.com",
+					admin_password: "AdminPass123!",
+					setup_key: "wrong-key",
+				})
+				.expect(401);
+			expect(response.body.success).toBe(false);
+		});
+
+		it("refuses to run again once any user already exists", async () => {
+			await DBHelper.createTestUser();
+
+			const response = await request(app)
+				.post("/api/auth/setup-admin")
+				.send({
+					admin_email: "newadmin2@example.com",
+					admin_password: "AdminPass123!",
+					setup_key: process.env.INITIAL_SETUP_KEY,
+				})
+				.expect(403);
+			expect(response.body.success).toBe(false);
+		});
+	});
+
+	describe("POST /api/auth/refresh", () => {
+		it("issues a new token for an authenticated user", async () => {
+			await DBHelper.createTestUser();
+			const login = await request(app)
+				.post("/api/auth/login")
+				.send({ emailOrUsername: "test@example.com", password: "TestPass123!" });
+
+			const response = await request(app)
+				.post("/api/auth/refresh")
+				.set("Authorization", `Bearer ${login.body.data.token}`)
+				.expect(200);
+			expect(response.body.data).toHaveProperty("token");
+		});
 	});
 
 	describe("POST /api/auth/login", () => {
@@ -302,7 +378,7 @@ describe("Authentication API", () => {
 				})
 				.expect(200);
 
-			expect(response.body.status).toBe("success");
+			expect(response.body.success).toBe(true);
 			expect(response.body.data).toHaveProperty("token");
 			expect(response.body.data.user.email).toBe("test@example.com");
 		});
@@ -316,7 +392,7 @@ describe("Authentication API", () => {
 				})
 				.expect(200);
 
-			expect(response.body.status).toBe("success");
+			expect(response.body.success).toBe(true);
 			expect(response.body.data).toHaveProperty("token");
 		});
 
@@ -422,7 +498,7 @@ describe("Authentication API", () => {
 				})
 				.expect(200);
 
-			expect(loginResponse.body.status).toBe("success");
+			expect(loginResponse.body.success).toBe(true);
 		});
 
 		it("should reject incorrect current password", async () => {

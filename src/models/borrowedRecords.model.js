@@ -1,4 +1,4 @@
-const { query, queryWithTransaction } = require("../config/database.config");
+const { query } = require("../config/database.config");
 
 // Create a new borrow record
 const createBorrowRecord = async (borrowData) => {
@@ -305,9 +305,7 @@ const countBorrowRecords = async (filters = {}) => {
 		}
 
 		if (filters.overdue_only) {
-			whereConditions.push(
-				"br.return_date IS NULL AND br.due_date < CURRENT_TIMESTAMP"
-			);
+			whereConditions.push("br.return_date IS NULL AND br.due_date < CURRENT_TIMESTAMP");
 		}
 
 		sql += " WHERE " + whereConditions.join(" AND ");

@@ -1,5 +1,7 @@
-require("dotenv").config();
+// This file lives in src/config/ — .env is one level up, in src/.
+require("dotenv").config({ path: require("node:path").resolve(__dirname, "..", ".env") });
 const mysql = require("mysql2/promise");
+const logger = require("../utils/logger");
 
 // Create a MySQL connection pool
 const pool = mysql.createPool({
@@ -7,40 +9,48 @@ const pool = mysql.createPool({
 	user: process.env.DB_USER || "root",
 	password: process.env.DB_PASSWORD || "",
 	database: process.env.DB_NAME || "library_db",
-	port: process.env.DB_PORT || 3306,
+	port: parseInt(process.env.DB_PORT) || 3306,
 	waitForConnections: true,
-	connectionLimit: 10,
+	connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT) || 10,
 	queueLimit: 0,
-	acquireTimeout: 60000,
+	connectTimeout: parseInt(process.env.DB_CONNECT_TIMEOUT) || 10000,
 });
+
+const SLOW_QUERY_THRESHOLD_MS = parseInt(process.env.SLOW_QUERY_THRESHOLD_MS) || 200;
 
 // Test database connection
 const testConnection = async () => {
 	try {
 		const connection = await pool.getConnection();
-		console.log("✅ Database connected successfully!");
+		logger.info("Database connected successfully");
 
-		// Test a simple query
 		const [rows] = await connection.execute("SELECT 1 as test");
-		console.log("✅ Database query test successful:", rows[0]);
+		logger.debug({ rows }, "Database query test successful");
 
 		connection.release();
 		return true;
 	} catch (error) {
-		console.error("❌ Database connection failed:", error.message);
+		logger.error({ err: error }, "Database connection failed");
 		return false;
 	}
 };
 
 // Query helper function
 const query = async (sql, params = []) => {
+	const start = process.env.NODE_ENV === "test" ? null : Date.now();
 	try {
 		const [rows] = await pool.query(sql, params);
+
+		if (start !== null) {
+			const duration = Date.now() - start;
+			if (duration > SLOW_QUERY_THRESHOLD_MS) {
+				logger.warn({ sql, duration }, "Slow query detected");
+			}
+		}
+
 		return rows;
 	} catch (error) {
-		console.error("Database query error:", error.message);
-		console.error("SQL:", sql);
-		console.error("Params:", params);
+		logger.error({ err: error, sql }, "Database query error");
 		throw error;
 	}
 };
@@ -51,9 +61,7 @@ const queryWithTransaction = async (connection, sql, params = []) => {
 		const [rows] = await connection.query(sql, params);
 		return rows;
 	} catch (error) {
-		console.error("Transaction query error:", error.message);
-		console.error("SQL:", sql);
-		console.error("Params:", params);
+		logger.error({ err: error, sql }, "Transaction query error");
 		throw error;
 	}
 };
@@ -80,9 +88,9 @@ const executeTransaction = async (callback) => {
 const closeConnection = async () => {
 	try {
 		await pool.end();
-		console.log("✅ Database connections closed successfully");
+		logger.info("Database connections closed successfully");
 	} catch (error) {
-		console.error("❌ Error closing database connections:", error.message);
+		logger.error({ err: error }, "Error closing database connections");
 	}
 };
 

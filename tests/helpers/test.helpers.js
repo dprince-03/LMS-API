@@ -1,104 +1,15 @@
-// const request = require('supertest');
-// const app = require('../../server');
-// const { query } = require('../../src/config/database.config');
-
-// // Clean up test database
-// const cleanupDatabase = async () => {
-//     await query('SET FOREIGN_KEY_CHECKS = 0');
-//     await query('TRUNCATE TABLE borrow_records');
-//     await query('TRUNCATE TABLE books');
-//     await query('TRUNCATE TABLE authors');
-//     await query('TRUNCATE TABLE users');
-//     await query('SET FOREIGN_KEY_CHECKS = 1');
-// };
-
-// // Create test user
-// const createTestUser = async (userData = {}) => {
-//     const defaultUser = {
-//         first_name: 'Test',
-//         last_name: 'User',
-//         user_name: `testuser_${Date.now()}`,
-//         email: `test${Date.now()}@example.com`,
-//         password: 'TestPassword123',
-//         role: 'User'
-//     };
-
-//     const response = await request(app)
-//         .post('/api/auth/register')
-//         .send({ ...defaultUser, ...userData });
-
-//     return response.body.data;
-// };
-
-// // Create test admin
-// const createTestAdmin = async () => {
-//     return createTestUser({
-//         user_name: `admin_${Date.now()}`,
-//         email: `admin${Date.now()}@example.com`,
-//         role: 'Admin'
-//     });
-// };
-
-// // Login helper
-// const loginUser = async (email, password) => {
-//     const response = await request(app)
-//         .post('/api/auth/login')
-//         .send({ email_or_username: email, password });
-
-//     return response.body.data.token;
-// };
-
-// // Create test author
-// const createTestAuthor = async (token, authorData = {}) => {
-//     const defaultAuthor = {
-//         first_name: 'Test',
-//         last_name: 'Author',
-//         email: `author${Date.now()}@example.com`
-//     };
-
-//     const response = await request(app)
-//         .post('/api/authors')
-//         .set('Authorization', `Bearer ${token}`)
-//         .send({ ...defaultAuthor, ...authorData });
-
-//     return response.body.data;
-// };
-
-// // Create test book
-// const createTestBook = async (token, authorId, bookData = {}) => {
-//     const defaultBook = {
-//         isbn: `ISBN${Date.now()}`,
-//         title: 'Test Book',
-//         author_id: authorId,
-//         total_copies: 5,
-//         available_copies: 5
-//     };
-
-//     const response = await request(app)
-//         .post('/api/books')
-//         .set('Authorization', `Bearer ${token}`)
-//         .send({ ...defaultBook, ...bookData });
-
-//     return response.body.data;
-// };
-
-// module.exports = {
-//     cleanupDatabase,
-//     createTestUser,
-//     createTestAdmin,
-//     loginUser,
-//     createTestAuthor,
-//     createTestBook
-// };
-
 const { query } = require("../../src/config/database.config");
-const {
-	createUser,
-	findUserByEmailOrUsername,
-} = require("../../src/models/users.model");
+const { createUser } = require("../../src/models/users.model");
 const { createAuthor } = require("../../src/models/authors.model");
 const { createBook } = require("../../src/models/books.model");
 const { createBorrowRecord } = require("../../src/models/borrowedRecords.model");
+
+// Monotonic counter (not just Date.now()) so fixtures created synchronously
+// within the same millisecond still get distinct default values — avoids
+// UNIQUE constraint collisions (users.email/user_name, authors.email,
+// books.isbn) when a test doesn't explicitly override them.
+let counter = 0;
+const unique = () => `${Date.now()}${++counter}`;
 
 class DBHelper {
 	static async clearDatabase() {
@@ -119,6 +30,11 @@ class DBHelper {
 		}
 	}
 
+	// Static default identity, deliberately NOT unique — most call sites rely
+	// on being able to log in afterward with the well-known
+	// test@example.com/testuser credentials (matching global.testUser in
+	// tests/setup.js) without threading a generated value back out. Pass an
+	// explicit override when a test needs more than one distinct user.
 	static async createTestUser(userData = {}) {
 		return await createUser({
 			first_name: "Test",
@@ -132,10 +48,11 @@ class DBHelper {
 	}
 
 	static async createTestAuthor(authorData = {}) {
+		const id = unique();
 		return await createAuthor({
 			first_name: "Test",
 			last_name: "Author",
-			email: "author@example.com",
+			email: `author${id}@example.com`,
 			...authorData,
 		});
 	}
@@ -148,8 +65,9 @@ class DBHelper {
 			authorId = author.id;
 		}
 
+		const id = unique();
 		return await createBook({
-			isbn: "978-1234567890",
+			isbn: `978-${id}`,
 			title: "Test Book",
 			author_id: authorId,
 			genre: "Fiction",

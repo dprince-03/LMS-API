@@ -2,6 +2,17 @@
 
 A comprehensive RESTful API for managing library operations with authentication, role-based access control, and a complete book borrowing system.
 
+## **📚 Documentation**
+
+- [SETUP.md](SETUP.md) — getting a dev environment running (Docker or manual)
+- [API.md](API.md) — full endpoint reference
+- [ARCHITECTURE.md](ARCHITECTURE.md) — system design, DB schema, auth model
+- [SECURITY_TESTING.md](SECURITY_TESTING.md) — security posture + manual test procedures
+- [DOCKER.md](DOCKER.md) — Docker-specific details
+- [TODO.md](TODO.md) — prioritized punch list / completion record
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to contribute
+- [CHANGELOG.md](CHANGELOG.md) — release notes
+
 ## **🚀 Features**
 
 - **🔐 JWT Authentication** - Secure user authentication with JSON Web Tokens
@@ -34,23 +45,24 @@ cd LMS-API
 # Install dependencies
 npm install
 
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your configuration
-
-# Generate secure secrets
-node generate-secrets.js
+# Set up environment variables (dotenv loads this from src/, not the repo root)
+cp src/.env.example src/.env
+# Edit src/.env with your configuration — generate a JWT_SECRET with:
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 # Set up database
-mysql -u root -p < library.database.sql
+mysql -u root -p < src/Database/library.database.sql
 
 # Start the server
 npm run dev
 ```
 
+See [SETUP.md](SETUP.md) for the full walkthrough (including the Docker
+path) and [DOCKER.md](DOCKER.md) for Docker-specific details.
+
 ## **⚙️ Environment Variables**
 
-Create a .env file with the following variables:
+Create a `src/.env` file with the following variables:
 
 ```
 # Server
@@ -294,25 +306,13 @@ All error responses follow this format:
 
 ### 1. Initial Setup
 
-```
-# Clone and install
-git clone <repository>
-npm install
-
-# Generate secrets
-node generate-secrets.js
-
-# Setup database
-mysql -u root -p < library.database.sql
-
-# Start development server
-npm run dev
-```
+See [Installation](#-installation) above (or [SETUP.md](SETUP.md) for the
+full walkthrough, including the Docker path).
 
 ### 2. Create Admin User
 
 ```
-# Use the setup key from your .env file
+# Use the setup key from your src/.env file
 curl -X POST http://localhost:5080/api/auth/setup-admin \
   -H "Content-Type: application/json" \
   -d '{
@@ -344,35 +344,34 @@ curl -X GET <http://localhost:5080/api/auth/me> \
 ```
 LMS-API/
 ├── src/
-│   ├── config/
-│   │   ├── database.config.js    # Database configuration
-│   │   └── auth.config.js        # Authentication configuration
-│   ├── controllers/
-│   │   ├── auth.controllers.js      # Authentication logic
-│   │   ├── authors.controllers.js   # Author management
-│   │   ├── books.controllers.js     # Book management
-│   │   ├── users.controllers.js     # User management
-│   │   └── bookRecords.controllers.js # Borrow records
-│   ├── middlewares/
-│   │   └── auth.middlewares.js      # Authentication & authorization
-│   ├── models/
-│   │   ├── authors.model.js         # Author data operations
-│   │   ├── books.model.js           # Book data operations
-│   │   ├── users.model.js           # User data operations
-│   │   └── borrowedRecords.model.js # Borrow record operations
-│   ├── routes/
-│   │   ├── auth.routes.js           # Authentication routes
-│   │   ├── authors.routes.js        # Author routes
-│   │   ├── books.routes.js          # Book routes
-│   │   ├── users.routes.js          # User routes
-│   │   └── bookRecords.routes.js    # Borrow record routes
-│   └── utils/
-├── library.database.sql          # Database schema
-├── generate-secrets.js           # Secret generation script
-├── .env                          # Environment variables
-├── package.json
-├── server.js                     # Main server file
-└── README.md
+│   ├── config/           # Database + auth/JWT/password/rate-limit config
+│   ├── controllers/      # Request handling, one file per resource
+│   ├── middlewares/      # Auth, validation, centralized error handling
+│   ├── models/           # All SQL lives here; row → API-shape formatting
+│   ├── routes/           # Express routers, one per resource
+│   ├── jobs/              # Scheduled jobs (overdue borrow-record sweep)
+│   ├── utils/             # Logger, cache, mailer, token/store helpers
+│   ├── validation/        # Zod request-body schemas
+│   ├── Database/          # library.database.sql (schema quick-start)
+│   ├── .env               # Real env vars (gitignored) — loaded via __dirname, not CWD
+│   ├── .env.example        # Template for src/.env
+│   └── server.js          # Entry point — middleware wiring, graceful shutdown
+├── migrations/            # Forward-only SQL migrations + schema_migrations tracking
+├── scripts/               # migrate.js (migration runner)
+├── tests/                 # Jest + Supertest — api/, unit/, helpers/; .env.test lives here too
+├── docs/                  # All documentation (this file included)
+│   ├── README.md          # You are here
+│   ├── SETUP.md           # Getting a dev environment running
+│   ├── API.md              # Full endpoint reference
+│   ├── ARCHITECTURE.md     # System design, DB schema, auth model
+│   ├── SECURITY_TESTING.md # Security posture + manual test procedures
+│   ├── TODO.md              # Prioritized punch list / completion record
+│   ├── CONTRIBUTING.md      # How to contribute
+│   ├── CHANGELOG.md         # Release notes
+│   └── DOCKER.md            # Docker-specific details
+├── docker/                # Dockerfile, docker-compose.yml, .env.example
+├── .github/workflows/     # CI (lint → test → docker build)
+└── package.json
 ```
 
 ## **🧪 Development**

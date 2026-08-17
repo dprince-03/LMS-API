@@ -1,4 +1,6 @@
-require("dotenv").config();
+// This file lives in src/config/ — .env is one level up, in src/.
+require("dotenv").config({ path: require("node:path").resolve(__dirname, "..", ".env") });
+const logger = require("../utils/logger");
 
 // JWT Configuration
 const jwtConfig = {
@@ -12,7 +14,7 @@ const jwtConfig = {
 // Password Configuration
 const passwordConfig = {
 	saltRounds: parseInt(process.env.BCRYPT_ROUNDS) || 12,
-	minLength: 6,
+	minLength: 8,
 	requireUppercase: true,
 	requireLowercase: true,
 	requireNumbers: true,
@@ -23,14 +25,12 @@ const passwordConfig = {
 const sessionConfig = {
 	maxActiveSessions: parseInt(process.env.MAX_ACTIVE_SESSIONS) || 5, // Max concurrent sessions per user
 	sessionTimeout: parseInt(process.env.SESSION_TIMEOUT) || 24 * 60 * 60 * 1000, // 24 hours in milliseconds
-	refreshTokenExpiry:
-		parseInt(process.env.REFRESH_TOKEN_EXPIRY) || 30 * 24 * 60 * 60 * 1000, // 30 days
+	refreshTokenExpiry: parseInt(process.env.REFRESH_TOKEN_EXPIRY) || 30 * 24 * 60 * 60 * 1000, // 30 days
 };
 
 // Rate Limiting Configuration
 const rateLimitConfig = {
-	windowMs:
-		parseInt(process.env.RATE_LIMIT_WINDOW) * 60 * 1000 || 15 * 60 * 1000, // 15 minutes default
+	windowMs: parseInt(process.env.RATE_LIMIT_WINDOW) * 60 * 1000 || 15 * 60 * 1000, // 15 minutes default
 	maxAttempts: {
 		guest: parseInt(process.env.RATE_LIMIT_GUEST) || 20,
 		user: parseInt(process.env.RATE_LIMIT_USER) || 60,
@@ -40,8 +40,7 @@ const rateLimitConfig = {
 	// Login attempt limits
 	loginAttempts: {
 		maxAttempts: parseInt(process.env.LOGIN_MAX_ATTEMPTS) || 5,
-		lockoutDuration:
-			parseInt(process.env.LOGIN_LOCKOUT_DURATION) || 30 * 60 * 1000, // 30 minutes
+		lockoutDuration: parseInt(process.env.LOGIN_LOCKOUT_DURATION) || 30 * 60 * 1000, // 30 minutes
 		progressiveDelay: true, // Increase delay with each failed attempt
 	},
 };
@@ -85,30 +84,21 @@ const rolePermissions = {
 	},
 };
 
-// Token blacklist (for logout functionality)
-// In production, use Redis or another cache system
-const tokenBlacklist = new Set();
-
 // Utility functions
 const authUtils = {
-	// Add token to blacklist
-	blacklistToken: (token) => {
-		tokenBlacklist.add(token);
-
-		// Clean up expired tokens periodically
-		setTimeout(
-			() => {
-				tokenBlacklist.delete(token);
-			},
-			jwtConfig.expiresIn === "7d"
-				? 7 * 24 * 60 * 60 * 1000
-				: 24 * 60 * 60 * 1000
-		);
+	// Blacklist a token until it would have naturally expired. Backed by
+	// src/utils/store.js — Redis when REDIS_URL is set, in-process otherwise.
+	blacklistToken: async (token, expiresInSeconds) => {
+		const { store } = require("../utils/store");
+		const ttl = expiresInSeconds || 7 * 24 * 60 * 60; // fall back to 7 days
+		await store.set(`blacklist:${token}`, "1", ttl);
 	},
 
 	// Check if token is blacklisted
-	isTokenBlacklisted: (token) => {
-		return tokenBlacklist.has(token);
+	isTokenBlacklisted: async (token) => {
+		const { store } = require("../utils/store");
+		const value = await store.get(`blacklist:${token}`);
+		return value !== null && value !== undefined;
 	},
 
 	// Generate secure random string
@@ -125,20 +115,15 @@ const authUtils = {
 
 	// Validate JWT secret strength
 	validateJwtSecret: () => {
-		if (
-			!jwtConfig.secret ||
-			jwtConfig.secret === "your_super_secret_jwt_key_here"
-		) {
-			console.warn(
-				"⚠️  WARNING: Using default JWT secret. Please set a strong JWT_SECRET in your environment variables!"
+		if (!jwtConfig.secret || jwtConfig.secret === "your_super_secret_jwt_key_here") {
+			logger.warn(
+				"Using default JWT secret. Set a strong JWT_SECRET in your environment variables!"
 			);
 			return false;
 		}
 
 		if (jwtConfig.secret.length < 32) {
-			console.warn(
-				"⚠️  WARNING: JWT secret is too short. Use at least 32 characters for better security!"
-			);
+			logger.warn("JWT secret is too short. Use at least 32 characters for better security!");
 			return false;
 		}
 
@@ -168,26 +153,31 @@ const authUtils = {
 
 // Initialize security checks
 const initializeAuth = () => {
-	console.log("🔐 Initializing authentication system...");
+	logger.info("Initializing authentication system...");
 
-	// Validate JWT secret
 	const isSecretValid = authUtils.validateJwtSecret();
 	if (!isSecretValid) {
-		console.log("❌ JWT secret validation failed");
+		if (process.env.NODE_ENV === "production") {
+			logger.error("Refusing to start in production with a missing/default/weak JWT_SECRET.");
+			process.exit(1);
+		}
+		logger.warn("JWT secret validation failed (non-production — continuing)");
 	} else {
-		console.log("✅ JWT secret validation passed");
+		logger.info("JWT secret validation passed");
 	}
 
-	// Log configuration
-	console.log(`✅ JWT expires in: ${jwtConfig.expiresIn}`);
-	console.log(`✅ Password min length: ${passwordConfig.minLength}`);
-	console.log(`✅ BCrypt rounds: ${passwordConfig.saltRounds}`);
-	console.log(
-		`✅ Rate limit window: ${rateLimitConfig.windowMs / 1000 / 60} minutes`
+	logger.info(
+		{
+			jwtExpiresIn: jwtConfig.expiresIn,
+			passwordMinLength: passwordConfig.minLength,
+			bcryptRounds: passwordConfig.saltRounds,
+			rateLimitWindowMinutes: rateLimitConfig.windowMs / 1000 / 60,
+			corsOrigins: securityConfig.corsOrigins,
+		},
+		"Auth configuration loaded"
 	);
-	console.log(`✅ CORS origins: ${securityConfig.corsOrigins.join(", ")}`);
 
-	console.log("🔐 Authentication system initialized");
+	logger.info("Authentication system initialized");
 };
 
 module.exports = {

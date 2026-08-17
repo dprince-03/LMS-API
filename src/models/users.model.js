@@ -1,11 +1,20 @@
-const { query, queryWithTransaction } = require("../config/database.config");
-const bcrypt = require('bcrypt');
+const { query } = require("../config/database.config");
+const { passwordConfig } = require("../config/auth.config");
+const { buildLikeParam } = require("../utils/sanitize");
+const bcrypt = require("bcrypt");
+
+// Fields a user may set on their own profile.
+const SELF_EDITABLE_FIELDS = ["first_name", "last_name", "phone", "email", "image_url", "password"];
+// Fields a Librarian may set on another user's profile — basic contact
+// info only; email/password/role/status stay Admin-or-self.
+const LIBRARIAN_EDITABLE_FIELDS = ["first_name", "last_name", "phone", "image_url"];
+// Fields an Admin may set on any user's profile.
+const ADMIN_EDITABLE_FIELDS = [...SELF_EDITABLE_FIELDS, "role", "is_active", "email_verified"];
 
 // Hash password
 const hashPassword = async (password) => {
 	try {
-		const saltRounds = parseInt(process.env.BCRYPT_ROUNDS) || 12;
-		return await bcrypt.hash(password, saltRounds);
+		return await bcrypt.hash(password, passwordConfig.saltRounds);
 	} catch (error) {
 		throw new Error(`Error hashing password: ${error.message}`);
 	}
@@ -13,24 +22,13 @@ const hashPassword = async (password) => {
 
 // Verify password
 const verifyPassword = async (plainPassword, hashedPassword) => {
+	if (!plainPassword || !hashedPassword) {
+		throw new Error("Both plainPassword and hashedPassword arguments are required");
+	}
+
 	try {
-		console.log("🔐 Password Verification Debug:");// remove later
-        console.log("   Plain password:", plainPassword);// remove later
-        console.log("   Hashed password prefix:", hashedPassword ? hashedPassword.substring(0, 50) + "..." : "Missing");// remove later
-
-		// ✅ Add validation for required arguments
-		if (!plainPassword || !hashedPassword) {
-			throw new Error(
-				"Both plainPassword and hashedPassword arguments are required"
-			);
-		} //remove later
-
-		const result = await bcrypt.compare(plainPassword, hashedPassword);
-		console.log("   Comparison result:", result); // remove later
-		
-		return result;
+		return await bcrypt.compare(plainPassword, hashedPassword);
 	} catch (error) {
-		console.error("   Verification error:", error.message); // remove later
 		throw new Error(`Error verifying password: ${error.message}`);
 	}
 };
@@ -42,7 +40,7 @@ const createUser = async (userData) => {
 		const hashedPassword = await hashPassword(userData.password);
 
 		const sql = `
-            INSERT INTO users (first_name, last_name, user_name, phone, email, password, 
+            INSERT INTO users (first_name, last_name, user_name, phone, email, password,
                              image_url, role, is_active, email_verified)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
@@ -72,13 +70,7 @@ const createUser = async (userData) => {
 // Find all users with pagination
 const findAllUsers = async (options = {}) => {
 	try {
-		const {
-			limit = 10,
-			offset = 0,
-			search = "",
-			role = null,
-			is_active = null,
-		} = options;
+		const { limit = 10, offset = 0, search = "", role = null, is_active = null } = options;
 
 		let sql = "SELECT * FROM users WHERE deleted_at IS NULL";
 		let params = [];
@@ -87,7 +79,8 @@ const findAllUsers = async (options = {}) => {
 		if (search) {
 			sql +=
 				" AND (first_name LIKE ? OR last_name LIKE ? OR user_name LIKE ? OR email LIKE ?)";
-			params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+			const like = buildLikeParam(search);
+			params.push(like, like, like, like);
 		}
 
 		if (role) {
@@ -110,7 +103,9 @@ const findAllUsers = async (options = {}) => {
 	}
 };
 
-// Find user by ID
+// Find user by ID — returns the auth-shaped object (includes password hash).
+// Only use this for internal auth flows (login, verifyToken). Anything that
+// might end up in an API response must call findUserByIdSafe instead.
 const findUserById = async (id) => {
 	try {
 		const sql = "SELECT * FROM users WHERE id = ? AND deleted_at IS NULL";
@@ -120,10 +115,16 @@ const findUserById = async (id) => {
 			return null;
 		}
 
-		return formatUserForAuth(rows[0]); // for auth
+		return formatUserForAuth(rows[0]);
 	} catch (error) {
 		throw new Error(`Error finding user: ${error.message}`);
 	}
+};
+
+// Find user by ID — password-free, safe to return directly in an API response.
+const findUserByIdSafe = async (id) => {
+	const user = await findUserById(id);
+	return formatUser(user);
 };
 
 // Find user by email
@@ -141,8 +142,7 @@ const findUserByEmail = async (email) => {
 // Find user by username
 const findUserByUsername = async (username) => {
 	try {
-		const sql =
-			"SELECT * FROM users WHERE user_name = ? AND deleted_at IS NULL";
+		const sql = "SELECT * FROM users WHERE user_name = ? AND deleted_at IS NULL";
 		const rows = await query(sql, [username]);
 
 		return rows.length > 0 ? formatUserForAuth(rows[0]) : null; // For auth
@@ -159,28 +159,33 @@ const findUserByEmailOrUsername = async (emailOrUsername) => {
 
 		return rows.length > 0 ? formatUserForAuth(rows[0]) : null; // For auth
 	} catch (error) {
-		throw new Error(
-			`Error finding user by email or username: ${error.message}`
-		);
+		throw new Error(`Error finding user by email or username: ${error.message}`);
 	}
 };
 
-// Update user
-const updateUserById = async (id, updateData) => {
+// Update user. `allowedFields` must be one of SELF_EDITABLE_FIELDS /
+// ADMIN_EDITABLE_FIELDS (or a subset) — the caller decides which, based on
+// who's making the request. Only literal, allowlisted column names are ever
+// interpolated into the SQL; unknown keys in `updateData` are silently
+// dropped rather than trusted.
+const updateUserById = async (id, updateData, allowedFields = SELF_EDITABLE_FIELDS) => {
 	try {
 		const fields = [];
 		const params = [];
 
-		// Build dynamic update query
-		Object.keys(updateData).forEach((key) => {
-			if (updateData[key] !== undefined && key !== "id" && key !== "password") {
+		for (const key of allowedFields) {
+			if (key === "password") continue; // handled separately below
+			if (
+				Object.prototype.hasOwnProperty.call(updateData, key) &&
+				updateData[key] !== undefined
+			) {
 				fields.push(`${key} = ?`);
 				params.push(updateData[key]);
 			}
-		});
+		}
 
 		// Handle password separately (hash it)
-		if (updateData.password) {
+		if (allowedFields.includes("password") && updateData.password) {
 			const hashedPassword = await hashPassword(updateData.password);
 			fields.push("password = ?");
 			params.push(hashedPassword);
@@ -191,9 +196,7 @@ const updateUserById = async (id, updateData) => {
 		}
 
 		params.push(id);
-		const sql = `UPDATE users SET ${fields.join(
-			", "
-		)} WHERE id = ? AND deleted_at IS NULL`;
+		const sql = `UPDATE users SET ${fields.join(", ")} WHERE id = ? AND deleted_at IS NULL`;
 
 		const result = await query(sql, params);
 		if (result.affectedRows === 0) {
@@ -266,7 +269,7 @@ const getUserBorrowRecords = async (userId, options = {}) => {
 
 		const rows = await query(sql, params);
 
-		const { formatBorrowRecord } = require("./borrowRecords.model");
+		const { formatBorrowRecord } = require("./borrowedRecords.model");
 		return rows.map((row) => {
 			const record = formatBorrowRecord(row);
 			record.book_title = row.book_title;
@@ -308,13 +311,13 @@ const getUserOverdueBooks = async (userId) => {
             SELECT br.*, b.title as book_title, b.isbn as book_isbn
             FROM borrow_records br
             JOIN books b ON br.book_id = b.id
-            WHERE br.user_id = ? AND br.return_date IS NULL 
+            WHERE br.user_id = ? AND br.return_date IS NULL
             AND br.due_date < CURRENT_TIMESTAMP
             ORDER BY br.due_date ASC
         `;
 		const rows = await query(sql, [userId]);
 
-		const { formatBorrowRecord } = require("./borrowRecords.model");
+		const { formatBorrowRecord } = require("./borrowedRecords.model");
 		return rows.map((row) => {
 			const record = formatBorrowRecord(row);
 			record.book_title = row.book_title;
@@ -335,12 +338,8 @@ const countUsers = async (filters = {}) => {
 		if (filters.search) {
 			sql +=
 				" AND (first_name LIKE ? OR last_name LIKE ? OR user_name LIKE ? OR email LIKE ?)";
-			params.push(
-				`%${filters.search}%`,
-				`%${filters.search}%`,
-				`%${filters.search}%`,
-				`%${filters.search}%`
-			);
+			const like = buildLikeParam(filters.search);
+			params.push(like, like, like, like);
 		}
 
 		if (filters.role) {
@@ -348,7 +347,7 @@ const countUsers = async (filters = {}) => {
 			params.push(filters.role);
 		}
 
-		if (filters.is_active !== null) {
+		if (filters.is_active !== null && filters.is_active !== undefined) {
 			sql += " AND is_active = ?";
 			params.push(filters.is_active);
 		}
@@ -371,7 +370,8 @@ const getUserFullName = (userData) => {
 	return `${userData.first_name || ""} ${userData.last_name || ""}`.trim();
 };
 
-// Format user object and add computed properties (exclude password)
+// Format user object and add computed properties (excludes password — safe
+// to send in any API response)
 const formatUser = (userData) => {
 	if (!userData) return null;
 
@@ -398,7 +398,9 @@ const formatUser = (userData) => {
 	};
 };
 
-// Format user object and add computed properties (exclude password)
+// Format user object including the password hash — for internal auth use
+// ONLY (login, verifyToken). Never pass the result of this straight to
+// res.json().
 const formatUserForAuth = (userData) => {
 	if (!userData) return null;
 
@@ -422,11 +424,11 @@ const formatUserForAuth = (userData) => {
 		is_admin: isUserAdmin(userData),
 		is_librarian: isUserLibrarian(userData),
 		is_member: isUserMember(userData),
-		// Note: password is included for authentication purppose
+		// Note: password is included for authentication purposes only
 	};
 };
 
-// Format user for public display (less sensitive data)
+// Format user for public display (least sensitive data)
 const formatUserPublic = (userData) => {
 	if (!userData) return null;
 
@@ -440,11 +442,15 @@ const formatUserPublic = (userData) => {
 };
 
 module.exports = {
+	SELF_EDITABLE_FIELDS,
+	LIBRARIAN_EDITABLE_FIELDS,
+	ADMIN_EDITABLE_FIELDS,
 	hashPassword,
 	verifyPassword,
 	createUser,
 	findAllUsers,
 	findUserById,
+	findUserByIdSafe,
 	findUserByEmail,
 	findUserByUsername,
 	findUserByEmailOrUsername,

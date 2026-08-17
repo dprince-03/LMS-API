@@ -15,13 +15,13 @@
 
 //     beforeEach(async () => {
 //         await cleanupDatabase();
-        
+
 //         const admin = await createTestAdmin();
 //         adminToken = admin.token;
-        
+
 //         const user = await createTestUser();
 //         userToken = user.token;
-        
+
 //         author = await createTestAuthor(adminToken);
 //     });
 
@@ -140,154 +140,311 @@
 //     });
 // });
 
+const request = require("supertest");
+const app = require("../../src/server");
+const DBHelper = require("../helpers/test.helpers");
 
+describe("Books API", () => {
+	let adminToken;
+	let testBook;
 
-const request = require('supertest');
-const app = require('../../server');
-const DBHelper = require('../helpers/test.helpers');
+	beforeEach(async () => {
+		await DBHelper.clearDatabase();
 
-describe('Books API', () => {
-    let authToken;
-    let adminToken;
-    let testBook;
+		// Create admin user and get token
+		await DBHelper.createTestUser({
+			email: "admin@example.com",
+			user_name: "adminuser",
+			role: "Admin",
+		});
 
-    beforeAll(async () => {
-        await DBHelper.clearDatabase();
-    
-        // Create admin user and get token
-        const admin = await DBHelper.createTestUser({
-            email: 'admin@example.com',
-            user_name: 'adminuser',
-            role: 'Admin'
-        });
+		const loginResponse = await request(app).post("/api/auth/login").send({
+			emailOrUsername: "admin@example.com",
+			password: "TestPass123!",
+		});
 
-        const loginResponse = await request(app)
-        .post('/api/auth/login')
-        .send({
-            emailOrUsername: 'admin@example.com',
-            password: 'TestPass123!'
-        });
+		adminToken = loginResponse.body.data.token;
 
-        adminToken = loginResponse.body.data.token;
+		// Create test book
+		testBook = await DBHelper.createTestBook();
+	});
 
-        // Create test book
-        testBook = await DBHelper.createTestBook();
-    });
+	afterEach(async () => {
+		await DBHelper.clearDatabase();
+	});
 
-    afterEach(async () => {
-        await DBHelper.clearDatabase();
-    });
+	describe("GET /api/books/:id", () => {
+		it("should include author details when include_author=true (regression: compared query string with === true)", async () => {
+			const response = await request(app)
+				.get(`/api/books/${testBook.id}?include_author=true`)
+				.expect(200);
 
-    describe('GET /api/books', () => {
-        it('should return paginated books list', async () => {
-            const response = await request(app)
-            .get('/api/books?page=1&limit=5')
-            .expect(200);
+			expect(response.body.data).toHaveProperty("author_details");
+			expect(response.body.data.author_details).not.toBeNull();
+		});
 
-            expect(response.body.success).toBe(true);
-            expect(response.body.data).toBeInstanceOf(Array);
-            expect(response.body.pagination).toHaveProperty('current_page', 1);
-        });
+		it("should include borrow records when include_borrows=true", async () => {
+			const response = await request(app)
+				.get(`/api/books/${testBook.id}?include_borrows=true`)
+				.expect(200);
 
-        it('should filter books by genre', async () => {
-            const response = await request(app)
-            .get('/api/books?genre=Fiction')
-            .expect(200);
+			expect(response.body.data).toHaveProperty("borrow_records");
+			expect(response.body.data).toHaveProperty("total_borrows");
+		});
 
-            expect(response.body.success).toBe(true);
-        });
-    });
+		it("should return 404 for a non-existent book", async () => {
+			await request(app).get("/api/books/999999").expect(404);
+		});
 
-    describe('POST /api/books', () => {
-        it('should create book with admin access', async () => {
-            const newBook = {
-                isbn: '978-0987654321',
-                title: 'New Test Book',
-                author_id: testBook.author_id,
-                genre: 'Science Fiction',
-                total_copies: 10,
-                available_copies: 10
-            };
+		it("should return 400 for a non-numeric book id", async () => {
+			await request(app).get("/api/books/not-a-number").expect(400);
+		});
+	});
 
-            const response = await request(app)
-            .post('/api/books')
-            .set('Authorization', `Bearer ${adminToken}`)
-            .send(newBook)
-            .expect(200);
+	describe("PUT /api/books/:id", () => {
+		it("should update a book with admin access", async () => {
+			const response = await request(app)
+				.put(`/api/books/${testBook.id}`)
+				.set("Authorization", `Bearer ${adminToken}`)
+				.send({ title: "Updated Title", genre: "Updated Genre" })
+				.expect(200);
 
-            expect(response.body.success).toBe(true);
-            expect(response.body.data.title).toBe(newBook.title);
-        });
+			expect(response.body.data.title).toBe("Updated Title");
+			expect(response.body.data.genre).toBe("Updated Genre");
+		});
 
-        it('should reject book creation without admin role', async () => {
-            // Create regular user
-            const user = await DBHelper.createTestUser({
-                email: 'user@example.com',
-                role: 'User'
-            });
+		it("should reject available_copies greater than total_copies", async () => {
+			await request(app)
+				.put(`/api/books/${testBook.id}`)
+				.set("Authorization", `Bearer ${adminToken}`)
+				.send({ available_copies: 999 })
+				.expect(400);
+		});
 
-            const loginResponse = await request(app)
-            .post('/api/auth/login')
-            .send({
-                emailOrUsername: 'user@example.com',
-                password: 'TestPass123!'
-            });
+		it("should reject update from a non-admin user", async () => {
+			const user = await DBHelper.createTestUser({
+				email: "updater@example.com",
+				user_name: "updateruser",
+			});
+			const login = await request(app)
+				.post("/api/auth/login")
+				.send({ emailOrUsername: "updater@example.com", password: "TestPass123!" });
 
-            const userToken = loginResponse.body.data.token;
+			await request(app)
+				.put(`/api/books/${testBook.id}`)
+				.set("Authorization", `Bearer ${login.body.data.token}`)
+				.send({ title: "Should Not Apply" })
+				.expect(403);
+			void user;
+		});
 
-            await request(app)
-            .post('/api/books')
-            .set('Authorization', `Bearer ${userToken}`)
-            .send({
-                isbn: '978-1111111111',
-                title: 'Unauthorized Book',
-                author_id: testBook.author_id
-            })
-            .expect(403);
-        });
-    });
+		it("should return 404 when updating a non-existent book", async () => {
+			await request(app)
+				.put("/api/books/999999")
+				.set("Authorization", `Bearer ${adminToken}`)
+				.send({ title: "Nope" })
+				.expect(404);
+		});
+	});
 
-    describe('POST /api/books/:id/borrow', () => {
-        let userToken;
+	describe("DELETE /api/books/:id", () => {
+		it("should delete a book with admin access (regression: typo referenced an undefined variable)", async () => {
+			const book = await DBHelper.createTestBook();
 
-        beforeEach(async () => {
-            const user = await DBHelper.createTestUser({
-                email: 'borrower@example.com'
-            });
+			const response = await request(app)
+				.delete(`/api/books/${book.id}`)
+				.set("Authorization", `Bearer ${adminToken}`)
+				.expect(200);
 
-            const loginResponse = await request(app)
-            .post('/api/auth/login')
-            .send({
-                emailOrUsername: 'borrower@example.com',
-                password: 'TestPass123!'
-            });
+			expect(response.body.success).toBe(true);
+		});
 
-            userToken = loginResponse.body.data.token;
-        });
+		it("should reject deleting a book with an active borrow", async () => {
+			const book = await DBHelper.createTestBook();
+			await request(app)
+				.post(`/api/books/${book.id}/borrow`)
+				.set("Authorization", `Bearer ${adminToken}`)
+				.send({});
 
-        it('should allow user to borrow available book', async () => {
-            const response = await request(app)
-            .post(`/api/books/${testBook.id}/borrow`)
-            .set('Authorization', `Bearer ${userToken}`)
-            .expect(201);
+			const response = await request(app)
+				.delete(`/api/books/${book.id}`)
+				.set("Authorization", `Bearer ${adminToken}`)
+				.expect(409);
 
-            expect(response.body.success).toBe(true);
-            expect(response.body.data.borrow_record).toHaveProperty('id');
-        });
+			expect(response.body.success).toBe(false);
+		});
 
-        it('should prevent borrowing unavailable book', async () => {
-            // Make book unavailable
-            await DBHelper.createTestBook({ available_copies: 0 });
+		it("should reject deletion from a non-admin user", async () => {
+			const book = await DBHelper.createTestBook();
+			await DBHelper.createTestUser({
+				email: "deleter@example.com",
+				user_name: "deleteruser",
+			});
+			const login = await request(app)
+				.post("/api/auth/login")
+				.send({ emailOrUsername: "deleter@example.com", password: "TestPass123!" });
 
-            const unavailableBook = await DBHelper.createTestBook({
-                title: 'Unavailable Book',
-                available_copies: 0
-            });
+			await request(app)
+				.delete(`/api/books/${book.id}`)
+				.set("Authorization", `Bearer ${login.body.data.token}`)
+				.expect(403);
+		});
+	});
 
-            await request(app)
-            .post(`/api/books/${unavailableBook.id}/borrow`)
-            .set('Authorization', `Bearer ${userToken}`)
-            .expect(409);
-        });
-    });
+	describe("POST /api/books/:id/return", () => {
+		it("should return a borrowed book", async () => {
+			const book = await DBHelper.createTestBook();
+			const user = await DBHelper.createTestUser({
+				email: "returner@example.com",
+				user_name: "returneruser",
+			});
+			const login = await request(app)
+				.post("/api/auth/login")
+				.send({ emailOrUsername: "returner@example.com", password: "TestPass123!" });
+			const token = login.body.data.token;
+
+			await request(app)
+				.post(`/api/books/${book.id}/borrow`)
+				.set("Authorization", `Bearer ${token}`)
+				.send({});
+
+			const response = await request(app)
+				.post(`/api/books/${book.id}/return`)
+				.set("Authorization", `Bearer ${token}`)
+				.expect(200);
+
+			expect(response.body.data).toHaveProperty("return_details");
+			void user;
+		});
+
+		it("should 404 when there is no active borrow to return", async () => {
+			const book = await DBHelper.createTestBook();
+			await request(app)
+				.post(`/api/books/${book.id}/return`)
+				.set("Authorization", `Bearer ${adminToken}`)
+				.expect(404);
+		});
+	});
+
+	describe("GET /api/books", () => {
+		it("should return paginated books list", async () => {
+			const response = await request(app).get("/api/books?page=1&limit=5").expect(200);
+
+			expect(response.body.success).toBe(true);
+			expect(response.body.data).toBeInstanceOf(Array);
+			expect(response.body.pagination).toHaveProperty("current_page", 1);
+		});
+
+		it("should filter books by genre", async () => {
+			const response = await request(app).get("/api/books?genre=Fiction").expect(200);
+
+			expect(response.body.success).toBe(true);
+		});
+	});
+
+	describe("POST /api/books", () => {
+		it("should create book with admin access", async () => {
+			const newBook = {
+				isbn: "978-0987654321",
+				title: "New Test Book",
+				author_id: testBook.author_id,
+				genre: "Science Fiction",
+				total_copies: 10,
+				available_copies: 10,
+			};
+
+			const response = await request(app)
+				.post("/api/books")
+				.set("Authorization", `Bearer ${adminToken}`)
+				.send(newBook)
+				.expect(201);
+
+			expect(response.body.success).toBe(true);
+			expect(response.body.data.title).toBe(newBook.title);
+		});
+
+		it('should save the language field (regression: controller destructured "launguage")', async () => {
+			const response = await request(app)
+				.post("/api/books")
+				.set("Authorization", `Bearer ${adminToken}`)
+				.send({
+					isbn: "978-1122334455",
+					title: "Language Regression Book",
+					author_id: testBook.author_id,
+					language: "French",
+					total_copies: 1,
+					available_copies: 1,
+				})
+				.expect(201);
+
+			expect(response.body.data.language).toBe("French");
+		});
+
+		it("should reject book creation without admin role", async () => {
+			// Create regular user
+			await DBHelper.createTestUser({
+				email: "user@example.com",
+				role: "User",
+			});
+
+			const loginResponse = await request(app).post("/api/auth/login").send({
+				emailOrUsername: "user@example.com",
+				password: "TestPass123!",
+			});
+
+			const userToken = loginResponse.body.data.token;
+
+			await request(app)
+				.post("/api/books")
+				.set("Authorization", `Bearer ${userToken}`)
+				.send({
+					isbn: "978-1111111111",
+					title: "Unauthorized Book",
+					author_id: testBook.author_id,
+				})
+				.expect(403);
+		});
+	});
+
+	describe("POST /api/books/:id/borrow", () => {
+		let userToken;
+
+		beforeEach(async () => {
+			await DBHelper.createTestUser({
+				email: "borrower@example.com",
+			});
+
+			const loginResponse = await request(app).post("/api/auth/login").send({
+				emailOrUsername: "borrower@example.com",
+				password: "TestPass123!",
+			});
+
+			userToken = loginResponse.body.data.token;
+		});
+
+		it("should allow user to borrow available book", async () => {
+			const response = await request(app)
+				.post(`/api/books/${testBook.id}/borrow`)
+				.set("Authorization", `Bearer ${userToken}`)
+				.expect(201);
+
+			expect(response.body.success).toBe(true);
+			expect(response.body.data.borrow_record).toHaveProperty("id");
+		});
+
+		it("should prevent borrowing unavailable book", async () => {
+			// Make book unavailable
+			await DBHelper.createTestBook({ available_copies: 0 });
+
+			const unavailableBook = await DBHelper.createTestBook({
+				title: "Unavailable Book",
+				available_copies: 0,
+			});
+
+			await request(app)
+				.post(`/api/books/${unavailableBook.id}/borrow`)
+				.set("Authorization", `Bearer ${userToken}`)
+				.expect(409);
+		});
+	});
 });
