@@ -74,7 +74,7 @@ jobs:
                   INITIAL_SETUP_KEY: ci_setup_key
                   DISABLE_OVERDUE_JOB: "true"
             - name: Upload coverage report
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: coverage-report
                   path: coverage/
