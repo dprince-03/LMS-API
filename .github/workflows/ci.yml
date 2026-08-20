@@ -117,7 +117,7 @@ jobs:
             # On pushes to main / version tags it also publishes to GHCR,
             # which is the actual "CD" half of this pipeline.
             - name: Build (and push on main/tags)
-              uses: docker/build-push-action@v6
+              uses: docker/build-push-action@v7
               with:
                   context: .
                   file: docker/Dockerfile
