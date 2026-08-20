@@ -3,7 +3,7 @@
 # ---- Base ----
 # Build context is expected to be the repo root (see docker-compose.yml's
 # `build.context: ..`), so all COPY paths below are relative to the repo root.
-FROM node:20-alpine AS base
+FROM node:26-alpine AS base
 WORKDIR /app
 RUN apk add --no-cache dumb-init
 
