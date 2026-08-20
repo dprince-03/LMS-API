@@ -117,7 +117,10 @@ npm start       # plain node, for production-like runs
 ```
 
 You should see a startup banner confirming the DB connection, JWT secret
-validation, and the port the server is listening on.
+validation, and the port the server is listening on. Once it's up, browse
+`http://localhost:5080/api/docs` for interactive, always-current API
+documentation (generated from the route annotations — see
+[`CONTRIBUTING.md`](CONTRIBUTING.md) if you're adding or changing a route).
 
 ### 5. Create the first admin user
 

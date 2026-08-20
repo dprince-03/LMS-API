@@ -1,79 +1,79 @@
 name: lms-api
 services:
-  api:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-      target: runtime
-    image: lms-api:latest
-    container_name: lms-api
-    restart: unless-stopped
-    ports:
-      - "${PORT:-5080}:${PORT:-5080}"
-    env_file:
-      - ../src/.env
-    environment:
-      # Override host-oriented values from .env so the app talks to the
-      # `db`/`redis` services by their Compose network names instead of
-      # localhost.
-      DB_HOST: db
-      DB_PORT: 3306
-      REDIS_URL: redis://redis:6379
-      # src/.env is shared with local/manual runs, where NODE_ENV=development
-      # is normal and expected — but env_file values override the Dockerfile's
-      # own `ENV NODE_ENV=production`, so without this the container silently
-      # runs in dev mode too (wrong logger transport, no JWT_SECRET
-      # boot-refusal, stack traces in error responses, etc). Force it here
-      # regardless of what's in the shared .env.
-      NODE_ENV: production
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - lms-network
+    api:
+        build:
+            context: ..
+            dockerfile: docker/Dockerfile
+            target: runtime
+        image: lms-api:latest
+        container_name: lms-api
+        restart: unless-stopped
+        ports:
+            - "${PORT:-5080}:${PORT:-5080}"
+        env_file:
+            - ../src/.env
+        environment:
+            # Override host-oriented values from .env so the app talks to the
+            # `db`/`redis` services by their Compose network names instead of
+            # localhost.
+            DB_HOST: db
+            DB_PORT: 3306
+            REDIS_URL: redis://redis:6379
+            # src/.env is shared with local/manual runs, where NODE_ENV=development
+            # is normal and expected — but env_file values override the Dockerfile's
+            # own `ENV NODE_ENV=production`, so without this the container silently
+            # runs in dev mode too (wrong logger transport, no JWT_SECRET
+            # boot-refusal, stack traces in error responses, etc). Force it here
+            # regardless of what's in the shared .env.
+            NODE_ENV: production
+        depends_on:
+            db:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        networks:
+            - lms-network
 
-  redis:
-    image: redis:7-alpine
-    container_name: lms-redis
-    restart: unless-stopped
-    # Backs the token blacklist and role-based rate limiter (src/utils/store.js).
-    # Not exposed to the host by default — only the api service needs it.
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-    networks:
-      - lms-network
+    redis:
+        image: redis:7-alpine
+        container_name: lms-redis
+        restart: unless-stopped
+        # Backs the token blacklist and role-based rate limiter (src/utils/store.js).
+        # Not exposed to the host by default — only the api service needs it.
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 10s
+            timeout: 5s
+            retries: 10
+            start_period: 10s
+        networks:
+            - lms-network
 
-  db:
-    image: mysql:8.0
-    container_name: lms-mysql
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-root}
-      MYSQL_DATABASE: ${DB_NAME:-library_db}
-    ports:
-      - "${DB_PORT:-3306}:3306"
-    volumes:
-      - lms-mysql-data:/var/lib/mysql
-      # Runs once, on first initialization of an empty data directory.
-      - ../src/Database/library.database.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 20s
-    networks:
-      - lms-network
+    db:
+        image: mysql:8.0
+        container_name: lms-mysql
+        restart: unless-stopped
+        environment:
+            MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-root}
+            MYSQL_DATABASE: ${DB_NAME:-library_db}
+        ports:
+            - "${DB_PORT:-3306}:3306"
+        volumes:
+            - lms-mysql-data:/var/lib/mysql
+            # Runs once, on first initialization of an empty data directory.
+            - ../src/Database/library.database.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+        healthcheck:
+            test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot"]
+            interval: 10s
+            timeout: 5s
+            retries: 10
+            start_period: 20s
+        networks:
+            - lms-network
 
 networks:
-  lms-network:
-    driver: bridge
+    lms-network:
+        driver: bridge
 
 volumes:
-  lms-mysql-data:
+    lms-mysql-data:

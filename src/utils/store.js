@@ -99,6 +99,11 @@ class RedisStore {
 
 let store;
 let hasRedis = false;
+// The raw ioredis client, exposed alongside `store` so callers that need
+// Redis-specific behavior the MemoryStore/RedisStore abstraction doesn't
+// cover (health-check pings, the response cache's pattern-based clear) can
+// reuse this one connection instead of opening another.
+let redisClient = null;
 
 if (process.env.REDIS_URL) {
 	try {
@@ -116,6 +121,7 @@ if (process.env.REDIS_URL) {
 		});
 		store = new RedisStore(redis);
 		hasRedis = true;
+		redisClient = redis;
 		logger.info("Rate limiting and token blacklist backed by Redis");
 	} catch (error) {
 		logger.warn(
@@ -131,4 +137,4 @@ if (process.env.REDIS_URL) {
 	);
 }
 
-module.exports = { store, hasRedis, MemoryStore, RedisStore };
+module.exports = { store, hasRedis, redisClient, MemoryStore, RedisStore };

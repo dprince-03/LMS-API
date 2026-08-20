@@ -4,14 +4,15 @@ A comprehensive RESTful API for managing library operations with authentication,
 
 ## **📚 Documentation**
 
-- [SETUP.md](SETUP.md) — getting a dev environment running (Docker or manual)
-- [API.md](API.md) — full endpoint reference
-- [ARCHITECTURE.md](ARCHITECTURE.md) — system design, DB schema, auth model
-- [SECURITY_TESTING.md](SECURITY_TESTING.md) — security posture + manual test procedures
-- [DOCKER.md](DOCKER.md) — Docker-specific details
-- [TODO.md](TODO.md) — prioritized punch list / completion record
-- [CONTRIBUTING.md](CONTRIBUTING.md) — how to contribute
-- [CHANGELOG.md](CHANGELOG.md) — release notes
+- [SETUP.md](docs/SETUP.md) — getting a dev environment running (Docker or manual)
+- [API.md](docs/API.md) — full endpoint reference (generated — see below)
+- Interactive docs — `GET /api/docs` on a running server (Swagger UI)
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) — system design, DB schema, auth model
+- [SECURITY_TESTING.md](docs/SECURITY_TESTING.md) — security posture + manual test procedures
+- [DOCKER.md](docs/DOCKER.md) — Docker-specific details
+- [TODO.md](docs/TODO.md) — prioritized punch list / completion record
+- [CONTRIBUTING.md](docs/CONTRIBUTING.md) — how to contribute
+- [CHANGELOG.md](docs/CHANGELOG.md) — release notes
 
 ## **🚀 Features**
 
@@ -57,8 +58,8 @@ mysql -u root -p < src/Database/library.database.sql
 npm run dev
 ```
 
-See [SETUP.md](SETUP.md) for the full walkthrough (including the Docker
-path) and [DOCKER.md](DOCKER.md) for Docker-specific details.
+See [SETUP.md](docs/SETUP.md) for the full walkthrough (including the Docker
+path) and [DOCKER.md](docs/DOCKER.md) for Docker-specific details.
 
 ## **⚙️ Environment Variables**
 
@@ -306,7 +307,7 @@ All error responses follow this format:
 
 ### 1. Initial Setup
 
-See [Installation](#-installation) above (or [SETUP.md](SETUP.md) for the
+See [Installation](#-installation) above (or [SETUP.md](docs/SETUP.md) for the
 full walkthrough, including the Docker path).
 
 ### 2. Create Admin User

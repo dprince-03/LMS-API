@@ -1,337 +1,325 @@
 # LMS-API — Security Test Plan
 
-A checklist for a security review pass across the API. Status here reflects a
-**static code review** (plus a couple of real tool runs — `npm audit`,
-targeted `grep`s — done in this pass) — nothing has been exercised against a
-running instance yet. Where an item is genuinely confirmed clean, it's marked
-verified; everything else is marked open with the specific gap and a pointer
-into [`TODO.md`](TODO.md) for the fix. The goal of a future pass is to convert
-every "reviewed" below into "verified live" with real `curl` requests against
-a running server — see the [live test procedures](#live-test-procedures) at
-the bottom, kept from the previous version of this doc.
+A checklist for a security review pass across the API. This is the second
+pass — the first (kept in git history) found two critical issues
+(self-service privilege escalation, column-name SQL injection) plus a long
+tail of smaller gaps; all of those have since been fixed and are marked
+closed below, with what changed. A handful of genuinely open items remain,
+listed under their section with what's still missing. Status here is a
+**static code review** (current file/line references, plus `npm audit` run
+fresh for this pass) — the [live test procedures](#live-test-procedures) at
+the bottom are copy-pasteable `curl` commands for verifying the closed items
+stay closed and exercising the open ones against a running server.
 
 ## 1. Authentication & authorization
 
-- [ ] **Auth** — bcrypt cost factor is configurable via `BCRYPT_ROUNDS`
-      (default 12, [`auth.config.js:14`](../src/config/auth.config.js#L14));
-      `bcrypt.compare` is timing-safe. **Gap:** the not-found path in `login`
-      ([`auth.controllers.js:160-166`](../src/controllers/auth.controllers.js#L160-L166))
-      returns immediately without a compare, while the wrong-password path
-      runs a full bcrypt compare — a measurable timing difference that lets an
-      attacker enumerate valid emails/usernames. Fix: always run a dummy
-      `bcrypt.compare` against a constant hash on the not-found path so both
-      branches take the same time.
-- [ ] **Auth bypass testing** — not live-tested this pass. Statically
-      reviewed: the `verifyToken` → `requireAuth` → `requireRole`/
-      `requireOwnershipOrAdmin` chain is sound in principle (see
-      [`ARCHITECTURE.md`](ARCHITECTURE.md#auth--authorization-model)), but
-      `GET /users/:id` is mis-wired — it chains `requireAdmin` before
-      `requireAdminOrLibrarian`, so the second check is unreachable
-      ([`users.routes.js:56`](../src/routes/users.routes.js#L56)). Needs a live
-      pass with real tokens per role once the Phase 0 fixes land.
-- [ ] **Privilege escalation** — **Critical, confirmed by code review, not yet
-      fixed.** `updateUserController`
-      ([`users.controllers.js:310-318`](../src/controllers/users.controllers.js#L310-L318))
-      only blocks four field names (`id`, `created_at`, `updated_at`,
-      `deleted_at`) — everything else in the request body, including `role`,
-      `is_active`, and `email_verified`, passes straight through to the
-      database. Combined with `requireOwnershipOrAdmin()` letting any user hit
-      `PUT /users/:id` for their **own** id
-      ([`users.routes.js:78`](../src/routes/users.routes.js#L78)), a plain
-      `User` can send `PUT /users/:id { "role": "Admin" }` against their own
-      account and become an Admin. `updateData.role` is only checked against
-      the enum of valid role *names*
-      ([`users.controllers.js:300-308`](../src/controllers/users.controllers.js#L300-L308))
-      — never checked against *who's allowed to set it*. This is the single
-      most severe issue found in this pass. Now tracked as a P0 item in
-      [`TODO.md`](TODO.md).
-- [ ] **JWT/token testing** — **Confirmed gap.** Both `jwt.verify` call sites
-      ([`auth.middlewares.js:31`](../src/middlewares/auth.middlewares.js#L31)
-      in `verifyToken`, and
-      [`auth.middlewares.js:141`](../src/middlewares/auth.middlewares.js#L141)
-      in `optionalAuth`) omit the `algorithms` option, so nothing pins the
-      expected signing algorithm. `jsonwebtoken`'s transitive dependency `jws`
-      also has an open advisory for HMAC signature verification (see §8) —
-      worth fixing both together. Tokens are otherwise well-formed (`id`/
-      `email`/`role` claims only), but `issuer`/`audience` are configured in
-      `auth.config.js` and **never actually passed** to `jwt.sign`
-      ([`auth.controllers.js:12-24`](../src/controllers/auth.controllers.js#L12-L24))
-      or checked in `jwt.verify` — configured but inert.
-- [ ] **Password policies** — inconsistent across the app: register/create-user
-      require 8+ chars with upper/lower/number, `changePassword` only requires
-      6 with no complexity check, and the register error message says "6
-      characters" while the actual check is `< 8`
-      ([`auth.controllers.js:56-59`](../src/controllers/auth.controllers.js#L56-L59)).
-      No account lockout after repeated failed logins despite
-      `rateLimitConfig.loginAttempts` already being defined and unused
-      ([`auth.config.js:41-46`](../src/config/auth.config.js#L41-L46)).
-- [ ] **Broken access control / IDOR** — resource ownership is checked
-      correctly for borrow records (`getUserBorrowRecord`, `extendDueDate`
-      both do an inline `req.user.id !== record.user_id` check) and for user
-      profile updates (`requireOwnershipOrAdmin`). The one confirmed gap is the
-      `GET /users/:id` routing bug noted above — Librarians and the resource
-      owner currently can't reach it at all (too restrictive, not too
-      permissive, but still wrong).
-- [ ] **Mass assignment** — **Root cause of the privilege-escalation finding
-      above.** `updateUserById`
-      ([`users.model.js:169-207`](../src/models/users.model.js#L169-L207)),
-      `updateBookById`
-      ([`books.model.js:132-157`](../src/models/books.model.js#L132-L157)),
-      and `updateAuthor`
-      ([`authors.model.js:86-114`](../src/models/authors.model.js#L86-L114))
-      all build their `UPDATE ... SET` clause by iterating
-      `Object.keys(updateData)` with **no field allowlist** — the column name
-      itself, not just the value, comes straight from client input. For
-      books/authors this only enables setting fields the model didn't intend
-      to expose (low impact — no privileged fields on those tables). For users
-      it's the role-escalation vector above. **Related, more severe:** because
-      the *column name* is interpolated directly
-      (`` `${key} = ?` ``, [`users.model.js:177`](../src/models/users.model.js#L177) /
-      [`books.model.js:140`](../src/models/books.model.js#L140) /
-      [`authors.model.js:95`](../src/models/authors.model.js#L95)) rather than
-      validated against a known column list, a crafted JSON key in the
-      request body reaches the query as raw SQL, not just as an unexpected
-      column — a real SQL injection vector distinct from the `LIMIT`/`OFFSET`
-      one already tracked. Both are now P0 items in `TODO.md`, sharing one
-      fix: replace the dynamic key iteration with an explicit per-model
-      allowlist of updatable columns.
+- [ ] **Timing-based user enumeration** — **Still open.** `login`
+      ([`auth.controllers.js:87-138`](../src/controllers/auth.controllers.js#L87-L138))
+      returns immediately on the not-found/inactive path without running a
+      bcrypt compare, while the wrong-password path always runs one. That's a
+      measurable timing difference an attacker can use to enumerate valid
+      emails/usernames. Fix: run a dummy `bcrypt.compare` against a constant
+      hash on the not-found path so both branches take comparable time.
+- [x] ~~**Auth bypass — `GET /users/:id` mis-wired**~~ — **Fixed.** Now uses
+      `requireOwnershipOrAdmin()`
+      ([`users.routes.js:120`](../src/routes/users.routes.js#L120)), so the
+      resource owner, Librarians, and Admins can all reach it — the previous
+      `requireAdmin` chain that made the Librarian check unreachable is gone.
+- [x] ~~**Privilege escalation via `PUT /users/:id`**~~ — **Fixed, was the
+      top finding of the previous pass.** `updateUserController`
+      ([`users.controllers.js:170-224`](../src/controllers/users.controllers.js#L170-L224))
+      now computes an explicit `allowedFields` allowlist based on the
+      caller's role and relationship to the target
+      (`SELF_EDITABLE_FIELDS` / `LIBRARIAN_EDITABLE_FIELDS` /
+      `ADMIN_EDITABLE_FIELDS`, defined in
+      [`users.model.js`](../src/models/users.model.js)), rejects any attempt
+      to set `role` with `403` unless the caller is Admin, and silently drops
+      every other field not on the allowlist before it ever reaches the
+      model layer. See the field-restriction table in
+      [`API.md`](API.md#users).
+- [x] ~~**JWT hardening**~~ — **Fixed.** `algorithms`/`issuer`/`audience` are
+      now pinned on both signing and verification
+      ([`tokens.js`](../src/utils/tokens.js)) via a shared `verifyAppToken`
+      helper, closing the "configured but inert" gap from before. The
+      `jsonwebtoken`/`jws` HMAC-verification advisory is also gone — see §8.
+- [ ] **Password policy — `setup-admin` bypasses the shared schema** — Every
+      other password-accepting endpoint validates through the shared Zod
+      `password` schema
+      ([`validation/schemas.js:4-18`](../src/validation/schemas.js#L4-L18)) —
+      8+ chars, upper/lower/number. `POST /auth/setup-admin`
+      ([`auth.routes.js:287`](../src/routes/auth.routes.js#L287)) is the one
+      route with no `validateBody` at all; `setup_admin`
+      ([`auth.controllers.js:323-409`](../src/controllers/auth.controllers.js#L323-L409))
+      re-implements the same three regex checks by hand instead. Not a
+      vulnerability — the checks are equivalent — but it's the one place a
+      future change to password rules won't apply unless someone remembers
+      to update it twice. Low priority; worth a `validateBody(setupAdminSchema)`
+      pass for consistency.
+- [x] ~~**No account lockout**~~ — **Fixed.** `login`
+      ([`auth.controllers.js:87-138`](../src/controllers/auth.controllers.js#L87-L138))
+      now tracks failed attempts per `emailOrUsername` in the shared store
+      (Redis-backed when configured) and returns `429` past
+      `LOGIN_MAX_ATTEMPTS` for `LOGIN_LOCKOUT_DURATION`.
+- [x] ~~**Mass assignment / column-name SQL injection**~~ — **Fixed, was the
+      second critical finding of the previous pass.** All three `update*`
+      functions now build their `SET` clause from an explicit allowlist
+      instead of `Object.keys(updateData)`: `UPDATABLE_FIELDS` in
+      [`books.model.js`](../src/models/books.model.js#L4-L18) and
+      [`authors.model.js`](../src/models/authors.model.js#L5-L12), and the
+      role-scoped allowlists in
+      [`users.model.js`](../src/models/users.model.js) described above. The
+      column name in the generated SQL is now always one of a known-safe set
+      — client input can only ever affect the parameterized _value_, never
+      the column name itself.
+- [x] ~~**Sort-column injection**~~ — **Verified clean.** `findAllAuthors`
+      interpolates `sort_by`/`order` directly into the `ORDER BY` clause
+      ([`authors.model.js:71`](../src/models/authors.model.js#L71)), but both
+      are validated first — `sort_by` against a `SORTABLE_FIELDS` allowlist,
+      `order` normalized to a strict `ASC`/`DESC` binary — before they ever
+      reach the query string.
 
 ## 2. Session & token management
 
-There's no server-side session store in the request path — auth is pure
-bearer-JWT. (`express-session` and `cookie-parser` are both in
-`package.json`, and `server.js` wires up `cookie-parser`, but grepping the
-codebase turns up zero reads of `req.cookies` or writes of `res.cookie`
-outside a commented-out block in `logout` — both are effectively dead weight
-for auth; see §8.)
+No server-side session store in the request path — auth is pure bearer-JWT.
+No `express-session`/`cookie-parser` in `package.json` anymore (both were
+declared-but-dead in the previous pass — now removed, see §8).
 
-- [X] ~~**Cookie-based session risk**~~ — **N/A, verified by design.** The JWT
-      is delivered via `Authorization: Bearer`, not a cookie, so there's
-      nothing here for `httpOnly`/`sameSite`/`secure` to protect, and CSRF
-      risk is correspondingly low — a malicious page can't make a browser
-      auto-attach a bearer token the way it would a cookie.
-- [X] ~~**Deactivation cuts off active tokens**~~ — **Verified clean.**
-      `verifyToken` re-fetches the user from the DB on every request and
-      rejects if `is_active` is false
-      ([`auth.middlewares.js:33-47`](../src/middlewares/auth.middlewares.js#L33-L47)).
-      Deactivating a user does immediately cut off their access — this part
-      works correctly.
-- [ ] **Instant session revocation / logout** — **Confirmed gap.**
-      `authUtils.isTokenBlacklisted` exists
-      ([`auth.config.js:110`](../src/config/auth.config.js#L109-L112)) but
-      `verifyToken` never calls it. `logout` records the event and returns
-      200, but the token it was handed is still valid for every subsequent
-      request until it naturally expires (up to `JWT_EXPIRE`, default 7 days).
-- [ ] **Concurrent session limits** — `sessionConfig.maxActiveSessions` is
-      defined in `auth.config.js` but nothing in the login flow checks or
-      enforces it — same "configured but inert" pattern as the JWT
-      issuer/audience claims above.
+- [x] ~~**Cookie-based session risk**~~ — **N/A, verified by design.** JWT is
+      delivered via `Authorization: Bearer`, not a cookie — nothing for
+      `httpOnly`/`sameSite`/`secure` to protect, and CSRF risk is
+      correspondingly low.
+- [x] ~~**Deactivation cuts off active tokens**~~ — **Verified clean.**
+      `verifyToken` re-fetches the user on every request and rejects if
+      `is_active` is false
+      ([`auth.middlewares.js:60-65`](../src/middlewares/auth.middlewares.js#L60-L65)).
+- [x] ~~**Instant session revocation / logout**~~ — **Fixed.** `logout`
+      blacklists the current token via the shared store
+      ([`auth.controllers.js:157-179`](../src/controllers/auth.controllers.js#L157-L179)),
+      and `verifyToken` now checks that blacklist on every request
+      ([`auth.middlewares.js:33-38`](../src/middlewares/auth.middlewares.js#L33-L38))
+      — a token used after logout is rejected immediately instead of
+      remaining valid until its natural expiry.
+- [x] ~~**Unauthenticated password reset**~~ — **Fixed.** The old
+      `POST /auth/reset-password` (no auth, no token, just an email + new
+      password) is gone. The flow is now
+      `POST /auth/forgot-password` → single-use, 1-hour, `purpose`-scoped
+      JWT (with a random `jti` so two tokens minted in the same second can't
+      collide) emailed to the account →
+      `POST /auth/reset-password` consumes it and blacklists it immediately
+      after use (`auth.controllers.js` `forgotPassword`/`resetPassword`,
+      [`tokens.js`](../src/utils/tokens.js)). Always responds with the same
+      generic message regardless of whether the email exists.
+- [ ] **Concurrent session limits** — still open. `sessionConfig.maxActiveSessions`
+      ([`auth.config.js:26`](../src/config/auth.config.js#L26)) is defined
+      and read nowhere else in the codebase — same "configured but inert"
+      shape as the previous pass's JWT-claims finding, just not yet acted on
+      for this one. Low priority for a JWT-based API (there's no session
+      table to enforce a limit against without adding one) — worth either
+      implementing or deleting the dead config, not leaving it looking
+      load-bearing.
 
 ## 3. Input validation & injection
 
-- [ ] **Input validation on all endpoints** — validation today is ad-hoc
-      `if (!field)` presence checks duplicated per controller (register,
-      create-user, create-book, create-author each reimplement the same
-      email-regex/required-field logic independently). No schema library in
-      use. Not a vulnerability by itself, but it's exactly the kind of
-      duplication that let the register endpoint's password-length message
-      drift from its actual check (§1).
-- [X] ~~**SQL injection (value position)**~~ — **Verified clean, with one
-      documented exception.** Every query in the codebase goes through
-      `mysql2`'s parameterized `query(sql, params)` helper
-      ([`database.config.js:36-46`](../src/config/database.config.js#L36-L46))
-      for values. The one exception is `LIMIT`/`OFFSET` string-interpolated in
-      `findAllBooks`
-      ([`books.model.js:82`](../src/models/books.model.js#L82)) — currently
-      only reachable as sanitized integers from controllers, tracked in
-      `TODO.md`. No `WHERE x = '${rawInput}'`-style value injection found
-      anywhere.
-- [ ] **SQL injection (identifier position)** — see the column-name injection
-      in §1 — a separate, live, unmitigated issue from the value-position one
-      above.
-- [ ] **Stored payload handling** — `books.description`, `authors.biography`,
-      and similar free-text fields are stored and returned as-is, with no
-      sanitization on the way in or an escaping contract documented on the way
-      out. This API has no server-rendered views itself, so there's no
-      first-party stored-XSS surface in this repo — but nothing here protects
-      a future frontend that renders these fields with `innerHTML`/
-      `dangerouslySetInnerHTML`. Worth a one-line note in `API.md` stating
-      these fields are unsanitized, HTML-unsafe strings.
-- [X] ~~**Path traversal / file handling**~~ — **N/A, verified.** `multer` is a
-      declared dependency but is never `require`d anywhere in `src/` or
-      `server.js` — there is no file upload endpoint in this API at all
-      despite the dependency existing (see §8).
+- [x] ~~**Input validation on all endpoints**~~ — **Fixed.** Every
+      request-body-accepting route except `setup-admin` (see §1) now runs
+      through `validateBody(schema)`
+      ([`validate.middlewares.js`](../src/middlewares/validate.middlewares.js))
+      backed by Zod schemas in
+      [`validation/schemas.js`](../src/validation/schemas.js) — the ad-hoc
+      duplicated `if (!field)` checks from the previous pass are gone.
+- [x] ~~**SQL injection (value position)**~~ — **Verified clean.** Every
+      query goes through `mysql2`'s parameterized `query(sql, params)`
+      ([`database.config.js`](../src/config/database.config.js)).
+- [x] ~~**SQL injection (identifier position)**~~ — **Fixed** — see the
+      mass-assignment/column-allowlist fix in §1.
+- [x] ~~**LIMIT/OFFSET injection**~~ — **Fixed.** Every list query now binds
+      `LIMIT ? OFFSET ?` as real parameters (`books.model.js`,
+      `authors.model.js`, `users.model.js`, `borrowedRecords.model.js`)
+      instead of interpolating the values as a string.
+- [x] ~~**LIKE-wildcard injection**~~ — **Fixed.** Every `search` filter now
+      goes through `buildLikeParam`/`escapeLikeWildcards`
+      ([`utils/sanitize.js`](../src/utils/sanitize.js)), which escapes `%`,
+      `_`, and the backslash escape character itself before wrapping the
+      term in wildcards — a search term containing `%` or `_` can no longer
+      widen the match beyond what the user actually typed.
+- [ ] **Stored payload handling** — still open, low severity. `books.description`,
+      `authors.biography`, and similar free-text fields are stored and
+      returned as-is, with no sanitization on the way in and no escaping
+      contract documented on the way out. This API has no server-rendered
+      views itself, so there's no first-party stored-XSS surface here — but
+      nothing protects a future frontend that renders these fields with
+      `innerHTML`/`dangerouslySetInnerHTML`. Worth a one-line note in
+      `API.md` stating these fields are unsanitized, HTML-unsafe strings.
+- [x] ~~**Path traversal / file handling**~~ — **N/A.** No file upload
+      endpoint exists in this API (`multer` — previously an unused
+      dependency — has been removed; see §8).
 
 ## 4. API & application security
 
-- [ ] **Rate limiting** — two independent limiters exist: a global
-      `express-rate-limit` (100 req/15 min per IP,
-      [`server.js:37-43`](../src/server.js#L37-L43)) applied to every `/api/*`
-      route, and a fully-implemented, role-aware `roleBasedRateLimit`
-      middleware
-      ([`auth.middlewares.js:192-246`](../src/middlewares/auth.middlewares.js#L192-L246))
-      that — checked against every route file — is **never actually mounted
-      anywhere**. The role-tiered limits documented in `API.md`/the README
-      aren't enforced by anything right now; only the flat global 100/15min
-      applies. Also note: `express-rate-limit` itself has an open
-      high-severity advisory via its `ip-address` dependency (IPv4-mapped
-      IPv6 bypass — see §8), independent of this app's own config.
-- [ ] **Security headers** — `server.js` sets four headers by hand
-      ([`server.js:61-67`](../src/server.js#L61-L67)): `X-Content-Type-Options`,
-      `X-Frame-Options`, `X-XSS-Protection` (deprecated, ignored by modern
-      browsers), and `Strict-Transport-Security`. No CSP, no
-      `Referrer-Policy`, no `Permissions-Policy`, and no `helmet` dependency
-      at all. Already recommended in `TODO.md` — worth prioritizing since it's
-      a small change for meaningfully broader coverage.
-- [X] ~~**File upload security**~~ — **N/A**, no upload endpoint exists (§3).
-- [X] ~~**API versioning / endpoint exposure**~~ — **Verified clean.** No
-      `/api-docs` or OpenAPI surface exists yet (`docs/API.md` is handwritten,
-      nothing generated/exposed). No dead/unmounted route files found — every
-      `*.routes.js` file is `app.use()`'d in `server.js`.
-- [X] ~~**Business logic — borrow/return integrity**~~ — **Verified clean.**
-      `borrowBook` and `returnBook` both run inside a real DB transaction
-      ([`books.model.js:227-267`](../src/models/books.model.js#L227-L267),
-      [`270-309`](../src/models/books.model.js#L270-L309)), so a crash
+- [x] ~~**Rate limiting not actually enforced**~~ — **Fixed.**
+      `roleBasedRateLimit()`
+      ([`auth.middlewares.js:219-262`](../src/middlewares/auth.middlewares.js#L219-L262))
+      is now mounted globally on every `/api/*` request
+      ([`server.js:101-103`](../src/server.js#L101-L103)), alongside the flat
+      IP-based backstop. Both are backed by the shared store (Redis when
+      `REDIS_URL` is set) and disabled under `NODE_ENV=test` so the
+      automated suite isn't flaky — see the [live test
+      procedures](#rate-limiting) to exercise this for real.
+- [x] ~~**Missing security headers**~~ — **Fixed.** `helmet()` is now
+      mounted first in the middleware chain
+      ([`server.js:77`](../src/server.js#L77)), replacing the four
+      hand-set headers from before (one of which, `X-XSS-Protection`, was
+      already deprecated). Helmet's defaults add a baseline CSP,
+      `Referrer-Policy`, `Permissions-Policy`, and the rest of its standard
+      set — not custom-tuned for this app, but real coverage where there was
+      none.
+- [x] ~~**File upload security**~~ — **N/A**, no upload endpoint exists (§3).
+- [x] ~~**API versioning / endpoint exposure**~~ — **Improved, and now
+      documented rather than absent.** An OpenAPI 3.0 spec is generated from
+      JSDoc annotations on every route
+      (`npm run docs:generate` → [`swagger.config.js`](../src/config/swagger.config.js) →
+      `src/openapi.json` + this repo's [`API.md`](API.md)) and served
+      interactively at `/api/docs`. No dead/unmounted route files — every
+      `*.routes.js` is `app.use()`'d in `server.js`.
+- [x] ~~**Business logic — borrow/return integrity**~~ — **Verified clean.**
+      `borrowBook`/`returnBook` both run inside a real DB transaction
+      ([`books.model.js`](../src/models/books.model.js)), so a crash
       mid-operation can't leave `available_copies` and the borrow record out
-      of sync. The max-5-books and no-double-borrow rules are enforced
-      server-side, not just assumed on the client. `updateBooksById` does use
-      the wrong lookup functions for its validation checks, but that's a
-      functional bug, not an exploitable one — see `TODO.md` Phase 1.
+      of sync. Max-5-books and no-double-borrow rules are enforced
+      server-side.
+- [ ] **Audit trail — partial coverage** — `auditLogger`
+      ([`auth.middlewares.js:265-290`](../src/middlewares/auth.middlewares.js#L265-L290))
+      exists and is wired to `POST /users`, `PUT /users/:id`, and
+      `DELETE /users/:id`
+      ([`users.routes.js`](../src/routes/users.routes.js)) — a real
+      improvement over the previous pass's "only ad-hoc console.log"
+      finding. It's not yet wired to book/author mutations, borrow/return,
+      or login/logout — so "who changed what, when" is reconstructable for
+      user-account changes but not for the rest of the API's writes. Worth
+      extending the same middleware to the remaining write routes.
 
 ## 5. Encryption & data protection
 
-- [ ] **Encryption in transit** — this repo has no TLS termination of its
-      own — Express listens on plain HTTP (`app.listen(PORT)`,
-      [`server.js:146`](../src/server.js#L146)), and the Docker Compose stack in
-      [`docker/`](../docker/) doesn't front it with a reverse proxy either.
-      Reasonable for local/dev, but TLS is entirely the deploying
-      environment's responsibility — worth stating explicitly in
-      [`SETUP.md`](SETUP.md)'s guidance rather than leaving it implicit.
-- [X] ~~**Secrets at rest**~~ — **Verified clean.** `.env` is gitignored, and
-      `git ls-files | grep env` turns up nothing committed. `JWT_SECRET`'s
-      strength is validated with a *warning* at startup
-      ([`auth.config.js:127-146`](../src/config/auth.config.js#L127-L146)) but
-      a weak/default secret doesn't stop the server from starting — already
-      tracked in `TODO.md` Phase 2 as a should-refuse-to-boot fix.
-- [ ] **Data at rest** — depends entirely on wherever MySQL's data directory
-      ends up (host filesystem or Docker volume) — outside this repo's
-      control either way.
+- [ ] **Encryption in transit** — still open, and inherently so. This repo
+      has no TLS termination of its own — Express listens on plain HTTP
+      ([`server.js`](../src/server.js)), and the Docker Compose stack in
+      [`docker/`](../docker/) doesn't front it with a reverse proxy. TLS is
+      entirely the deploying environment's responsibility (a platform load
+      balancer, an nginx/Caddy sidecar, etc.) — worth stating explicitly in
+      [`SETUP.md`](SETUP.md) rather than leaving it implicit, since it's easy
+      to deploy this as-is and not notice.
+- [x] ~~**Secrets at rest**~~ — **Fixed — now enforced, not just warned
+      about.** `.env` is gitignored and nothing is committed. A missing,
+      default, or short `JWT_SECRET` now makes the process refuse to boot in
+      production
+      ([`auth.config.js:159-163`](../src/config/auth.config.js#L159-L163)) —
+      previously this only logged a warning and continued.
+- [ ] **Data at rest** — outside this repo's control either way; depends on
+      wherever MySQL's data directory ends up (host filesystem or Docker
+      volume). No change from the previous pass.
 
 ## 6. Error handling & resilience
 
-- [ ] **Error boundaries** — **Confirmed gap.** The global error handler in
-      `server.js` returns `stack: err.stack` on every 500, unconditionally —
-      no `NODE_ENV` gate at all
-      ([`server.js:110-119`](../src/server.js#L110-L119)). Every controller also
-      independently returns `error: error.message` from its own catch block —
-      more contained (usually just a message, not a trace) but still not
-      environment-gated. [`errorHandler.middlewares.js`](../src/middlewares/errorHandler.middlewares.js)
-      exists as a dedicated place to centralize this and is completely empty
-      and unused.
-- [ ] **Consistent error shape** — three different response envelopes coexist
-      (`{success}`, `{error: true}`, `{status: 'fail'|'success'}`) —
-      cosmetic, but makes "did this request fail" harder to check generically
-      from a client. Already in `TODO.md`.
+- [x] ~~**Error boundaries leaking stack traces**~~ — **Fixed.**
+      [`errorHandler.middlewares.js`](../src/middlewares/errorHandler.middlewares.js)
+      — previously empty and unused — is now the single centralized error
+      handler, and gates `stack`/`error` behind `NODE_ENV !== "production"`.
+      Every controller's own catch block still returns a generic message on
+      unhandled errors, not `error.message`.
+- [x] ~~**Inconsistent error shape**~~ — **Fixed.** Every response now uses
+      the single `{ success, message, data?, pagination?, errors? }`
+      envelope — the three coexisting shapes from before (`{success}` /
+      `{error: true}` / `{status: 'fail'|'success'}`) are gone.
 
 ## 7. Observability & incident response
 
-- [ ] **Logging** — **Confirmed gap, more severe than a typical missing-log
-      finding — this is the single highest-impact item in this whole pass.**
-      `verifyPassword`
-      ([`users.model.js:15-36`](../src/models/users.model.js#L15-L36)) logs
-      the **plaintext password** and a hash prefix to stdout on every login
-      attempt; `login`
-      ([`auth.controllers.js:139-231`](../src/controllers/auth.controllers.js#L139-L231))
-      logs the full request body and password-hash existence; `server.js`'s
-      debug middleware
-      ([`server.js:47-53`](../src/server.js#L47-L53)) logs every request body for
-      every route. Wherever these logs are collected — a file, container
-      logs, a log aggregator — credentials sit there in plaintext. This is
-      `TODO.md` Phase 0's top item.
-- [ ] **Audit trail** — no structured audit log exists for security-relevant
-      events (role changes, admin creation, password resets, deactivation) —
-      only ad-hoc `console.log`/`console.error` scattered through 6 files. No
-      way to reconstruct "who changed what, when" after the fact.
-- [ ] **Monitoring / alerting** — no error-tracking integration (Sentry or
-      equivalent). Uncaught exceptions and unhandled rejections are logged to
-      console and trigger a graceful shutdown
-      ([`server.js:224-238`](../src/server.js#L224-L238)), but nothing pages
-      anyone or persists the failure anywhere durable.
-- [ ] **Backups** — no backup mechanism exists for the MySQL data — schema
-      only (`library.database.sql`), no dump/restore script, no scheduled
-      job. Given the DB is the only datastore in this project, worth a real
-      `mysqldump` script before this runs anywhere that matters.
+- [x] ~~**Plaintext credential logging**~~ — **Fixed, was the highest-impact
+      finding of the previous pass.** Structured `pino` logging
+      ([`utils/logger.js`](../src/utils/logger.js)) now redacts
+      `password`/`current_password`/`new_password` at every nesting level
+      the redact config covers, and the per-request body-logging debug
+      middleware that dumped every request body (credentials included) is
+      gone.
+- [ ] **Audit trail** — see §4; partial, not full, coverage.
+- [x] ~~**Monitoring / alerting**~~ — **Fixed.** Sentry integration
+      ([`utils/errorTracking.js`](../src/utils/errorTracking.js)) is wired
+      into the global error handler and the uncaught-exception/unhandled-
+      rejection handlers in `server.js` — a no-op when `SENTRY_DSN` isn't
+      set (local dev, most test runs), active when it is. Errors are still
+      logged locally either way.
+- [ ] **Backups** — still open. No backup mechanism exists for the MySQL
+      data — schema only (`migrations/`), no dump/restore script, no
+      scheduled job. Worth a real `mysqldump` script before this runs
+      anywhere the data matters.
 
 ## 8. Infrastructure & dependency supply chain
 
-- [ ] **`npm audit`** — **run in this pass**, real numbers:
-      **9 vulnerabilities (3 moderate, 6 high)**, all in transitive
-      dependencies.
-  - `jws` (high, via `jsonwebtoken`) — "Improperly Verifies HMAC Signature,"
-    directly related to the missing `algorithms:` pin in §1.
-  - `express-rate-limit`/`ip-address` (high) — IPv4-mapped IPv6 rate-limit
-    bypass, directly related to the rate-limiting gap in §4.
-  - `multer` (high, 5 separate DoS advisories) and `nodemailer` (high, 7
-    advisories including SMTP command injection) — both **fully unused** in
-    this codebase (confirmed via `grep -rn "multer\|nodemailer" src/
-    server.js` — zero hits for either). Removing them from `package.json`
-    closes those advisories outright instead of patching unreachable code.
-  - `body-parser`, `morgan`, `path-to-regexp`, `qs` (moderate/high) —
-    transitive via `express` and its own deps; `npm audit fix`
-    (non-breaking) should clear these.
-  - Not yet run: `npm audit fix` itself, or a rebuild/retest afterward.
-    Tracked in `TODO.md`.
-- [ ] **Dead dependencies** — beyond `multer`/`nodemailer` above,
-      `express-session` is declared and `cookie-parser` is wired up in
-      `server.js`, but nothing in the auth flow uses sessions (pure JWT) —
-      worth confirming intentional before removing, in case a session-based
-      feature is planned.
-- [X] ~~**CI / supply chain pinning**~~ — **N/A, nothing to pin yet.** No
-      GitHub Actions workflows exist in this repo (`.github/workflows/` not
-      present). Worth designing the CI pipeline (`TODO.md` Phase 6) with
-      SHA-pinned third-party actions from the start rather than retrofitting
-      later.
-- [X] ~~**Container security**~~ — **Verified.** [`docker/Dockerfile`](../docker/Dockerfile)
-      already runs as a non-root user on a minimal `node:20-alpine` base — no
-      root-process gap to flag. Not yet scanned with a dedicated image
-      scanner (Trivy/Grype) — worth adding once CI exists.
+- [x] ~~**`npm audit` findings**~~ — **Fixed.** Previous pass: 9
+      vulnerabilities (3 moderate, 6 high) — `jws` (HMAC verification,
+      related to the unpinned JWT algorithm in §1), `express-rate-limit`/
+      `ip-address` (rate-limit bypass), `multer` and `nodemailer` (unused at
+      the time, pulling in advisories for code that was never reachable),
+      plus transitive `body-parser`/`morgan`/`path-to-regexp`/`qs` issues.
+      Re-run for this pass: **0 vulnerabilities.** `multer` and the unused
+      `express-session`/`cookie-parser` have been removed entirely rather
+      than patched around; `nodemailer` is now actually used (the
+      forgot-password email flow, [`utils/mailer.js`](../src/utils/mailer.js))
+      instead of being dead weight.
+- [x] ~~**Dead dependencies**~~ — **Fixed** — see above.
+- [x] ~~**CI / supply chain pinning**~~ — **Now exists.**
+      [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs
+      lint → test → Docker build on every push/PR, and publishes the image
+      to GHCR on `main`/version tags.
+      [`.github/dependabot.yml`](../.github/dependabot.yml) keeps npm,
+      Docker base images, and Action versions from silently drifting. **Not
+      yet done:** third-party Actions are pinned by version tag
+      (`docker/build-push-action@v6`) rather than by commit SHA — tags are
+      mutable, so this is a supply-chain hardening step worth doing before
+      this pipeline handles anything more sensitive than a portfolio
+      project's own image.
+- [x] ~~**Container security**~~ — **Verified, still clean.**
+      [`docker/Dockerfile`](../docker/Dockerfile) runs as a non-root user on
+      a minimal `node:20-alpine` base, multi-stage so dev dependencies never
+      reach the runtime image. Not yet scanned with a dedicated image
+      scanner (Trivy/Grype) — worth adding as a CI step now that the
+      pipeline actually exists to add it to.
 
 ---
 
 ## Summary
 
-Two findings from this pass are more severe than anything in the original
-code review and are now the top priority in `TODO.md`, ahead of everything
-else in Phase 0:
+Both critical findings from the previous pass — self-service privilege
+escalation and column-name SQL injection, sharing one root cause
+(`Object.keys(updateData)`-driven `UPDATE` clauses with no allowlist) — are
+fixed, along with the plaintext-credential-logging issue that was the
+highest-impact finding after those two. `npm audit` went from 9
+vulnerabilities to 0.
 
-1. **Self-service privilege escalation** (§1) — any authenticated `User` can
-   `PUT` their own profile with `{"role": "Admin"}` and it will be applied
-   verbatim. No exploit chain, no injection — just a normal authenticated
-   request.
-2. **Column-name SQL injection** in `updateUserById`/`updateBookById`/
-   `updateAuthor` (§1) — the object-key-as-column-name pattern used by all
-   three `update*` functions passes attacker-controlled JSON keys straight
-   into the SQL string.
+What's left, in priority order:
 
-Both share the same fix: replace `Object.keys(updateData).forEach(...)` with
-an explicit per-model allowlist of updatable columns. One change closes both.
+1. **Timing-based login enumeration** (§1) — still exploitable, low effort
+   to fix (one dummy bcrypt compare on the not-found path).
+2. **Encryption in transit** (§5) — inherent to how this is deployed, not a
+   code fix; needs explicit documentation so it isn't deployed bare.
+3. **Backups** (§7) and **audit trail coverage** (§4) — both partial/absent,
+   both straightforward to extend from what already exists.
+4. A handful of low-priority consistency items: `setup-admin`'s ad-hoc
+   password check (§1), the dead `maxActiveSessions` config (§1), and
+   SHA-pinning third-party Actions (§8).
 
-Everything in this document came from static code review and two real tool
-runs (`npm audit`, targeted `grep`s) — none of it has been exercised against
-a running instance yet. The next real step is standing up the Docker stack in
-[`docker/`](../docker/), working through `TODO.md` Phase 0–1, then re-running
-the procedures below against a live server to convert "reviewed" into
-"verified."
+None of the remaining items are the kind of "any authenticated user becomes
+Admin with one request" severity the previous pass turned up — this is
+cleanup, not triage.
 
 ---
 
 ## Live test procedures
 
-Kept from the previous version of this document — copy-pasteable `curl`
-procedures for once a server is actually running. See
-[`docs/SETUP.md`](SETUP.md) to get one up.
+Copy-pasteable `curl` procedures against a running server (see
+[`SETUP.md`](SETUP.md) to get one up) — both to verify the closed items stay
+closed, and to exercise the items still open above.
 
-### Password hash leak
+### Password hash leak (regression check)
 
 ```bash
 TOKEN="<a valid user JWT>"
@@ -341,7 +329,7 @@ curl -s http://localhost:5080/api/auth/me -H "Authorization: Bearer $TOKEN" | gr
 Expected: no output. Repeat against `GET /users/:id`, `POST /users`,
 `PUT /users/:id`, `GET /users/profile`.
 
-### Self-privilege-escalation (new — §1)
+### Self-privilege-escalation (regression check)
 
 ```bash
 USER_TOKEN="<a valid User-role JWT>"
@@ -351,9 +339,9 @@ curl -s -X PUT http://localhost:5080/api/users/$USER_ID \
   -d '{"role":"Admin"}'
 ```
 
-Expected: `403`, role unchanged. Currently: `200`, role becomes `Admin`.
+Expected (fixed): `403`, role unchanged.
 
-### Column-name SQL injection (new — §1)
+### Column-name SQL injection (regression check)
 
 ```bash
 USER_TOKEN="<a valid User-role JWT>"
@@ -363,23 +351,10 @@ curl -s -X PUT http://localhost:5080/api/users/$USER_ID \
   -d "{\"role='Admin' -- \":\"x\"}"
 ```
 
-Expected: `400` (rejected as an invalid field). Test cautiously — depending on
-exact MySQL parsing this may throw a syntax error (safe) or partially execute
-(not safe) against a real column list; run only against a disposable test
-database.
+Expected (fixed): `400` — the field isn't on the allowlist, so it's dropped
+before it ever reaches SQL, and validation rejects the empty resulting body.
 
-### Unauthenticated password reset
-
-```bash
-curl -s -X POST http://localhost:5080/api/auth/reset-password \
-  -H "Content-Type: application/json" \
-  -d '{"email":"victim@example.com","newPassword":"Hacked123!"}'
-```
-
-Expected: `404`/route removed. Currently: `200` — full account takeover with
-nothing but a known email.
-
-### Logout token invalidation
+### Logout token invalidation (regression check)
 
 ```bash
 TOKEN="<a valid user JWT>"
@@ -387,7 +362,19 @@ curl -s -X POST http://localhost:5080/api/auth/logout -H "Authorization: Bearer 
 curl -s http://localhost:5080/api/auth/me -H "Authorization: Bearer $TOKEN"
 ```
 
-Expected: second call returns `401`. Currently: still returns the profile.
+Expected (fixed): second call returns `401`.
+
+### Unauthenticated password reset (regression check)
+
+```bash
+curl -s -X POST http://localhost:5080/api/auth/reset-password \
+  -H "Content-Type: application/json" \
+  -d '{"token":"not-a-real-token","new_password":"Hacked123!"}'
+```
+
+Expected (fixed): `400` — a `token` is required and this one doesn't verify.
+There is no way to reset a password with just an email anymore; get a real
+token via `POST /auth/forgot-password` first to test the full flow.
 
 ### Vertical privilege escalation (role boundary)
 
@@ -423,11 +410,11 @@ for i in $(seq 1 25); do
 done; echo
 ```
 
-Expected (per role-tiered limits as documented): mostly `200` then `429`.
-Currently: only the flat global 100/15min limiter is actually mounted (§4),
-so this will look more permissive than the docs suggest until that's fixed.
+Expected (Guest tier, 20 req/min): mostly `200` then `429` once the 21st
+request lands within the same minute. Run against a server started without
+`NODE_ENV=test` — both limiters are disabled in the test environment.
 
-### Timing-based user enumeration (new — §1)
+### Timing-based user enumeration (still open — §1)
 
 ```bash
 time curl -s -o /dev/null -X POST http://localhost:5080/api/auth/login \
@@ -439,16 +426,23 @@ time curl -s -o /dev/null -X POST http://localhost:5080/api/auth/login \
   -d '{"emailOrUsername":"<a real registered email>","password":"wrong-password"}'
 ```
 
-Expected: comparable timing. Currently: the second call should measurably
-outlast the first (bcrypt compare only runs when the account exists).
+Expected once fixed: comparable timing. Currently: the second call should
+measurably outlast the first (bcrypt compare only runs when the account
+exists).
 
 ## Automated checks worth adding
 
-- `npm audit` (or `npm audit --production`) in CI on every PR.
-- Dependency scanning (Dependabot/Snyk), particularly for `jsonwebtoken`,
-  `bcrypt`, and `mysql2` given what they protect.
-- A pre-commit or CI grep for `console.log` in `src/` that isn't behind a
-  logger abstraction, to stop debug/credential logging from creeping back in.
+- `npm audit` (already in CI on every push — see
+  [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)); consider
+  failing the build on `moderate` instead of the current implicit default,
+  now that the baseline is 0.
+- A container image scanner (Trivy/Grype) as a CI step now that a
+  `docker` job exists to add it to.
+- Dependabot is live ([`.github/dependabot.yml`](../.github/dependabot.yml))
+  — worth periodically checking its PRs aren't just accumulating unmerged.
+- A pre-commit or CI grep for `console.log` in `src/` that isn't behind the
+  `pino` logger, to stop debug/credential logging from creeping back in now
+  that it's been removed once already.
 
 ## Reporting
 

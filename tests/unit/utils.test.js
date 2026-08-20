@@ -79,41 +79,137 @@ describe("mailer", () => {
 	});
 });
 
-describe("SimpleCache", () => {
-	it("returns undefined for a missing key", () => {
-		const cache = new SimpleCache(30);
-		expect(cache.get("missing")).toBeUndefined();
+// No REDIS_URL in the test env (see tests/.env.test), so SimpleCache falls
+// back to its in-process Map implementation here — the Redis-backed path is
+// covered separately below via a mocked ioredis client.
+describe("SimpleCache (in-memory fallback, no REDIS_URL in test env)", () => {
+	it("returns undefined for a missing key", async () => {
+		const cache = new SimpleCache("test", 30);
+		expect(await cache.get("missing")).toBeUndefined();
 	});
 
-	it("stores and retrieves a value", () => {
-		const cache = new SimpleCache(30);
-		cache.set("a", { foo: "bar" });
-		expect(cache.get("a")).toEqual({ foo: "bar" });
+	it("stores and retrieves a value", async () => {
+		const cache = new SimpleCache("test", 30);
+		await cache.set("a", { foo: "bar" });
+		expect(await cache.get("a")).toEqual({ foo: "bar" });
 	});
 
 	it("expires a value after its TTL", async () => {
-		const cache = new SimpleCache(0.01); // 10ms
-		cache.set("a", "value");
+		const cache = new SimpleCache("test", 0.01); // 10ms
+		await cache.set("a", "value");
 		await new Promise((resolve) => setTimeout(resolve, 30));
-		expect(cache.get("a")).toBeUndefined();
+		expect(await cache.get("a")).toBeUndefined();
 	});
 
-	it("clears everything when called with no prefix", () => {
-		const cache = new SimpleCache(30);
-		cache.set("a", 1);
-		cache.set("b", 2);
-		cache.clear();
-		expect(cache.get("a")).toBeUndefined();
-		expect(cache.get("b")).toBeUndefined();
+	it("clears everything", async () => {
+		const cache = new SimpleCache("test", 30);
+		await cache.set("a", 1);
+		await cache.set("b", 2);
+		await cache.clear();
+		expect(await cache.get("a")).toBeUndefined();
+		expect(await cache.get("b")).toBeUndefined();
 	});
 
-	it("clears only keys matching a prefix", () => {
-		const cache = new SimpleCache(30);
-		cache.set("books:1", 1);
-		cache.set("authors:1", 2);
-		cache.clear("books:");
-		expect(cache.get("books:1")).toBeUndefined();
-		expect(cache.get("authors:1")).toBe(2);
+	it("keeps separate namespaces from colliding on the same key", async () => {
+		const booksCache = new SimpleCache("books", 30);
+		const authorsCache = new SimpleCache("authors", 30);
+		await booksCache.set("/list", "books-response");
+		await authorsCache.set("/list", "authors-response");
+		expect(await booksCache.get("/list")).toBe("books-response");
+		expect(await authorsCache.get("/list")).toBe("authors-response");
+	});
+});
+
+// Exercises the Redis-backed path by mocking src/utils/store's exports
+// directly (rather than standing up a real Redis instance) — mirrors the
+// pattern used for the errorTracking Sentry tests above.
+describe("SimpleCache (Redis-backed, mocked store module)", () => {
+	const makeMockRedisClient = () => {
+		const data = new Map();
+		const sets = new Map();
+		return {
+			async get(key) {
+				return data.has(key) ? data.get(key) : null;
+			},
+			async set(key, value) {
+				data.set(key, value);
+				return "OK";
+			},
+			async sadd(key, member) {
+				if (!sets.has(key)) sets.set(key, new Set());
+				sets.get(key).add(member);
+				return 1;
+			},
+			async smembers(key) {
+				return Array.from(sets.get(key) || []);
+			},
+			async expire() {
+				return 1;
+			},
+			async del(...keys) {
+				let removed = 0;
+				for (const key of keys) {
+					if (data.delete(key)) removed++;
+					if (sets.delete(key)) removed++;
+				}
+				return removed;
+			},
+		};
+	};
+
+	it("stores and retrieves a value via the mocked client", async () => {
+		await jest.isolateModulesAsync(async () => {
+			const mockClient = makeMockRedisClient();
+			jest.doMock("../../src/utils/store", () => ({
+				hasRedis: true,
+				redisClient: mockClient,
+			}));
+
+			const IsolatedCache = require("../../src/utils/cache");
+			const cache = new IsolatedCache("books", 30);
+
+			await cache.set("/books?page=1", { data: [1, 2, 3] });
+			expect(await cache.get("/books?page=1")).toEqual({ data: [1, 2, 3] });
+		});
+	});
+
+	it("clear() removes every key it previously set", async () => {
+		await jest.isolateModulesAsync(async () => {
+			const mockClient = makeMockRedisClient();
+			jest.doMock("../../src/utils/store", () => ({
+				hasRedis: true,
+				redisClient: mockClient,
+			}));
+
+			const IsolatedCache = require("../../src/utils/cache");
+			const cache = new IsolatedCache("authors", 30);
+
+			await cache.set("/authors?page=1", "one");
+			await cache.set("/authors?page=2", "two");
+			await cache.clear();
+
+			expect(await cache.get("/authors?page=1")).toBeUndefined();
+			expect(await cache.get("/authors?page=2")).toBeUndefined();
+		});
+	});
+
+	it("get() treats a client error as a cache miss instead of throwing", async () => {
+		await jest.isolateModulesAsync(async () => {
+			const failingClient = {
+				async get() {
+					throw new Error("connection lost");
+				},
+			};
+			jest.doMock("../../src/utils/store", () => ({
+				hasRedis: true,
+				redisClient: failingClient,
+			}));
+
+			const IsolatedCache = require("../../src/utils/cache");
+			const cache = new IsolatedCache("books", 30);
+
+			await expect(cache.get("/books")).resolves.toBeUndefined();
+		});
 	});
 });
 

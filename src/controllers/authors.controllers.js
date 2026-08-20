@@ -11,7 +11,10 @@ const {
 const logger = require("../utils/logger");
 const SimpleCache = require("../utils/cache");
 
-const authorsCache = new SimpleCache(parseInt(process.env.AUTHORS_CACHE_TTL_SECONDS) || 30);
+const authorsCache = new SimpleCache(
+	"authors",
+	parseInt(process.env.AUTHORS_CACHE_TTL_SECONDS) || 30
+);
 
 const createAuthorController = async (req, res) => {
 	try {
@@ -35,7 +38,7 @@ const createAuthorController = async (req, res) => {
 			email,
 		});
 
-		authorsCache.clear();
+		await authorsCache.clear();
 
 		return res.status(201).json({
 			success: true,
@@ -62,7 +65,7 @@ const getAllAuthors = async (req, res) => {
 		} = req.query;
 
 		const cacheKey = req.originalUrl;
-		const cached = authorsCache.get(cacheKey);
+		const cached = await authorsCache.get(cacheKey);
 		if (cached) {
 			return res.status(200).json(cached);
 		}
@@ -94,7 +97,7 @@ const getAllAuthors = async (req, res) => {
 			},
 		};
 
-		authorsCache.set(cacheKey, responseBody);
+		await authorsCache.set(cacheKey, responseBody);
 		return res.status(200).json(responseBody);
 	} catch (error) {
 		logger.error({ err: error }, "Error fetching authors");
@@ -181,7 +184,7 @@ const updateAuthorById = async (req, res) => {
 		}
 
 		const updatedAuthor = await updateAuthor(parseInt(id), updateData);
-		authorsCache.clear();
+		await authorsCache.clear();
 
 		res.status(200).json({
 			success: true,
@@ -233,7 +236,7 @@ const deleteAuthorByIdController = async (req, res) => {
 			});
 		}
 
-		authorsCache.clear();
+		await authorsCache.clear();
 
 		res.status(200).json({
 			success: true,

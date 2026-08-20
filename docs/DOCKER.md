@@ -93,8 +93,9 @@ docker run --rm --env-file src/.env -e NODE_ENV=test lms-api:test
 - The image has no build step (plain JS, no bundler), so the Dockerfile is
   intentionally simple: install prod deps, copy source, run.
 - The container healthcheck hits `GET /api/health`, which also checks
-  database connectivity (`src/routes/health.routes.js`) — a `503` there means
-  the process is up but can't reach MySQL.
+  database connectivity, and Redis connectivity when `REDIS_URL` is set
+  (`src/routes/health.routes.js`) — a `503` there means the process is up but
+  can't reach one of its dependencies; the response body says which.
 - Redis isn't strictly required — if `REDIS_URL` is unset the app falls back
   to an in-process store (see `src/utils/store.js`), which is fine for a
   single instance but won't share state across replicas or survive a

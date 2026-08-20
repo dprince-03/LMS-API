@@ -1,0 +1,2631 @@
+{
+	"openapi": "3.0.3",
+	"info": {
+		"title": "Library Management System API",
+		"version": "1.1.0",
+		"description": "REST API for a library management system — books, authors, users, and the borrow/return workflow, with role-based access control (Admin/Librarian/User).\n\nThis document is generated from JSDoc annotations on the route files (`npm run docs:generate`) — do not hand-edit `docs/API.md` or `src/openapi.json`.",
+		"license": {
+			"name": "ISC"
+		}
+	},
+	"servers": [
+		{
+			"url": "http://localhost:5080/api",
+			"description": "Local development"
+		},
+		{
+			"url": "{baseUrl}/api",
+			"description": "Custom",
+			"variables": {
+				"baseUrl": {
+					"default": "http://localhost:5080"
+				}
+			}
+		}
+	],
+	"tags": [
+		{
+			"name": "Health",
+			"description": "Liveness/readiness checks"
+		},
+		{
+			"name": "Auth",
+			"description": "Registration, login, and session management"
+		},
+		{
+			"name": "Authors",
+			"description": "Author records"
+		},
+		{
+			"name": "Books",
+			"description": "Book catalog, borrowing, and returns"
+		},
+		{
+			"name": "Users",
+			"description": "User accounts and profiles"
+		},
+		{
+			"name": "Borrow Records",
+			"description": "Borrow/return history, overdue tracking, statistics"
+		}
+	],
+	"components": {
+		"securitySchemes": {
+			"bearerAuth": {
+				"type": "http",
+				"scheme": "bearer",
+				"bearerFormat": "JWT",
+				"description": "Obtain a token from `POST /auth/register`, `POST /auth/login`, or `POST /auth/setup-admin`, then send it as `Authorization: Bearer <token>`."
+			}
+		},
+		"schemas": {
+			"Error": {
+				"type": "object",
+				"properties": {
+					"success": {
+						"type": "boolean",
+						"example": false
+					},
+					"message": {
+						"type": "string",
+						"example": "What went wrong"
+					},
+					"error": {
+						"type": "string",
+						"description": "Detail, omitted in production for 500s."
+					}
+				}
+			},
+			"ValidationError": {
+				"type": "object",
+				"properties": {
+					"success": {
+						"type": "boolean",
+						"example": false
+					},
+					"message": {
+						"type": "string",
+						"example": "Validation failed"
+					},
+					"errors": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"field": {
+									"type": "string",
+									"example": "email"
+								},
+								"message": {
+									"type": "string",
+									"example": "Invalid email format"
+								}
+							}
+						}
+					}
+				}
+			},
+			"Pagination": {
+				"type": "object",
+				"properties": {
+					"current_page": {
+						"type": "integer",
+						"example": 1
+					},
+					"total_pages": {
+						"type": "integer",
+						"example": 5
+					},
+					"total_items": {
+						"type": "integer",
+						"example": 47
+					},
+					"items_per_page": {
+						"type": "integer",
+						"example": 10
+					},
+					"has_next": {
+						"type": "boolean",
+						"example": true
+					},
+					"has_prev": {
+						"type": "boolean",
+						"example": false
+					}
+				}
+			},
+			"User": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "integer",
+						"example": 1
+					},
+					"first_name": {
+						"type": "string",
+						"example": "John"
+					},
+					"last_name": {
+						"type": "string",
+						"example": "Doe"
+					},
+					"full_name": {
+						"type": "string",
+						"example": "John Doe"
+					},
+					"user_name": {
+						"type": "string",
+						"example": "johndoe"
+					},
+					"email": {
+						"type": "string",
+						"format": "email",
+						"example": "john@example.com"
+					},
+					"phone": {
+						"type": "string",
+						"nullable": true,
+						"example": "08012345678"
+					},
+					"image_url": {
+						"type": "string",
+						"nullable": true
+					},
+					"role": {
+						"type": "string",
+						"enum": ["Admin", "Librarian", "User"],
+						"example": "User"
+					},
+					"is_active": {
+						"type": "boolean",
+						"example": true
+					},
+					"email_verified": {
+						"type": "boolean",
+						"example": false
+					},
+					"created_at": {
+						"type": "string",
+						"format": "date-time"
+					},
+					"updated_at": {
+						"type": "string",
+						"format": "date-time"
+					}
+				}
+			},
+			"UserPublic": {
+				"type": "object",
+				"description": "Limited fields exposed by GET /users/public.",
+				"properties": {
+					"id": {
+						"type": "integer",
+						"example": 1
+					},
+					"first_name": {
+						"type": "string",
+						"example": "John"
+					},
+					"last_name": {
+						"type": "string",
+						"example": "Doe"
+					},
+					"user_name": {
+						"type": "string",
+						"example": "johndoe"
+					},
+					"role": {
+						"type": "string",
+						"enum": ["Admin", "Librarian", "User"]
+					}
+				}
+			},
+			"AuthTokenResponse": {
+				"type": "object",
+				"properties": {
+					"success": {
+						"type": "boolean",
+						"example": true
+					},
+					"message": {
+						"type": "string"
+					},
+					"data": {
+						"type": "object",
+						"properties": {
+							"user": {
+								"$ref": "#/components/schemas/User"
+							},
+							"token": {
+								"type": "string",
+								"description": "JWT access token"
+							},
+							"token_type": {
+								"type": "string",
+								"example": "Bearer"
+							},
+							"expires_in": {
+								"type": "string",
+								"example": "7d"
+							}
+						}
+					}
+				}
+			},
+			"Author": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "integer",
+						"example": 1
+					},
+					"first_name": {
+						"type": "string",
+						"example": "George"
+					},
+					"last_name": {
+						"type": "string",
+						"example": "Orwell"
+					},
+					"email": {
+						"type": "string",
+						"format": "email",
+						"example": "orwell@example.com"
+					},
+					"phone": {
+						"type": "string",
+						"nullable": true
+					},
+					"image": {
+						"type": "string",
+						"nullable": true
+					},
+					"date_of_birth": {
+						"type": "string",
+						"format": "date",
+						"nullable": true
+					},
+					"biography": {
+						"type": "string",
+						"nullable": true
+					},
+					"created_at": {
+						"type": "string",
+						"format": "date-time"
+					},
+					"updated_at": {
+						"type": "string",
+						"format": "date-time"
+					}
+				}
+			},
+			"Book": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "integer",
+						"example": 1
+					},
+					"isbn": {
+						"type": "string",
+						"example": "978-0451524935"
+					},
+					"title": {
+						"type": "string",
+						"example": "1984"
+					},
+					"author_id": {
+						"type": "integer",
+						"example": 1
+					},
+					"published_date": {
+						"type": "string",
+						"format": "date",
+						"nullable": true
+					},
+					"description": {
+						"type": "string",
+						"nullable": true
+					},
+					"cover_image": {
+						"type": "string",
+						"nullable": true
+					},
+					"genre": {
+						"type": "string",
+						"nullable": true,
+						"example": "Dystopian Fiction"
+					},
+					"language": {
+						"type": "string",
+						"nullable": true,
+						"example": "English"
+					},
+					"pages": {
+						"type": "integer",
+						"nullable": true,
+						"example": 328
+					},
+					"publisher": {
+						"type": "string",
+						"nullable": true
+					},
+					"available_copies": {
+						"type": "integer",
+						"example": 5
+					},
+					"total_copies": {
+						"type": "integer",
+						"example": 5
+					},
+					"status": {
+						"type": "string",
+						"enum": ["Available", "Borrowed", "Reserved", "Lost"],
+						"example": "Available"
+					},
+					"created_at": {
+						"type": "string",
+						"format": "date-time"
+					},
+					"updated_at": {
+						"type": "string",
+						"format": "date-time"
+					}
+				}
+			},
+			"BorrowRecord": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "integer",
+						"example": 10
+					},
+					"user_id": {
+						"type": "integer",
+						"example": 1
+					},
+					"book_id": {
+						"type": "integer",
+						"example": 1
+					},
+					"borrow_date": {
+						"type": "string",
+						"format": "date-time"
+					},
+					"due_date": {
+						"type": "string",
+						"format": "date-time"
+					},
+					"return_date": {
+						"type": "string",
+						"format": "date-time",
+						"nullable": true
+					},
+					"status": {
+						"type": "string",
+						"enum": ["Borrowed", "Returned", "Overdue"],
+						"example": "Borrowed"
+					},
+					"is_active": {
+						"type": "boolean",
+						"example": true
+					}
+				}
+			}
+		},
+		"responses": {
+			"Unauthorized": {
+				"description": "Missing, invalid, or expired token",
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/Error"
+						},
+						"example": {
+							"success": false,
+							"message": "Access denied. No token provided"
+						}
+					}
+				}
+			},
+			"Forbidden": {
+				"description": "Authenticated, but wrong role or not the resource owner",
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/Error"
+						},
+						"example": {
+							"success": false,
+							"message": "Access denied. Required role(s): Admin. Your role: User"
+						}
+					}
+				}
+			},
+			"NotFound": {
+				"description": "Resource not found",
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/Error"
+						}
+					}
+				}
+			},
+			"ValidationFailed": {
+				"description": "Request body failed schema validation",
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/ValidationError"
+						}
+					}
+				}
+			},
+			"RateLimited": {
+				"description": "Too many requests",
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/Error"
+						},
+						"example": {
+							"success": false,
+							"message": "Too many requests from this IP, please try again after 15 minutes"
+						}
+					}
+				}
+			}
+		}
+	},
+	"security": [
+		{
+			"bearerAuth": []
+		}
+	],
+	"paths": {
+		"/users/public": {
+			"get": {
+				"tags": ["Users"],
+				"summary": "List users (public, limited fields)",
+				"security": [],
+				"parameters": [
+					{
+						"name": "page",
+						"in": "query",
+						"schema": {
+							"type": "integer",
+							"default": 1
+						}
+					},
+					{
+						"name": "limit",
+						"in": "query",
+						"schema": {
+							"type": "integer",
+							"default": 20
+						}
+					},
+					{
+						"name": "role",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"enum": ["Admin", "Librarian", "User"]
+						}
+					},
+					{
+						"name": "is_active",
+						"in": "query",
+						"schema": {
+							"type": "boolean",
+							"default": true
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Paginated public user list.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"success": {
+											"type": "boolean",
+											"example": true
+										},
+										"data": {
+											"type": "array",
+											"items": {
+												"$ref": "#/components/schemas/UserPublic"
+											}
+										},
+										"pagination": {
+											"$ref": "#/components/schemas/Pagination"
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/users/profile": {
+			"get": {
+				"tags": ["Users"],
+				"summary": "Get the current user's full profile, with borrowing statistics",
+				"responses": {
+					"200": {
+						"description": "Current user's profile."
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					}
+				}
+			}
+		},
+		"/users": {
+			"get": {
+				"tags": ["Users"],
+				"summary": "List all users",
+				"description": "Requires the Admin role.",
+				"parameters": [
+					{
+						"name": "page",
+						"in": "query",
+						"schema": {
+							"type": "integer",
+							"default": 1
+						}
+					},
+					{
+						"name": "limit",
+						"in": "query",
+						"schema": {
+							"type": "integer",
+							"default": 10
+						}
+					},
+					{
+						"name": "search",
+						"in": "query",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "role",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"enum": ["Admin", "Librarian", "User"]
+						}
+					},
+					{
+						"name": "is_active",
+						"in": "query",
+						"schema": {
+							"type": "boolean"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Paginated user list.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"success": {
+											"type": "boolean",
+											"example": true
+										},
+										"data": {
+											"type": "array",
+											"items": {
+												"$ref": "#/components/schemas/User"
+											}
+										},
+										"pagination": {
+											"$ref": "#/components/schemas/Pagination"
+										}
+									}
+								}
+							}
+						}
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"403": {
+						"$ref": "#/components/responses/Forbidden"
+					}
+				}
+			},
+			"post": {
+				"tags": ["Users"],
+				"summary": "Create a user",
+				"description": "Requires the Admin role. Can create any role, unlike self-registration.",
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": [
+									"first_name",
+									"last_name",
+									"user_name",
+									"email",
+									"password"
+								],
+								"properties": {
+									"first_name": {
+										"type": "string",
+										"example": "Jane"
+									},
+									"last_name": {
+										"type": "string",
+										"example": "Smith"
+									},
+									"user_name": {
+										"type": "string",
+										"minLength": 3,
+										"example": "janesmith"
+									},
+									"email": {
+										"type": "string",
+										"format": "email"
+									},
+									"phone": {
+										"type": "string",
+										"nullable": true
+									},
+									"password": {
+										"type": "string",
+										"example": "Password123"
+									},
+									"image_url": {
+										"type": "string",
+										"nullable": true
+									},
+									"role": {
+										"type": "string",
+										"enum": ["Admin", "Librarian", "User"],
+										"default": "User"
+									},
+									"is_active": {
+										"type": "boolean",
+										"default": true
+									},
+									"email_verified": {
+										"type": "boolean",
+										"default": false
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"201": {
+						"description": "User created.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"success": {
+											"type": "boolean",
+											"example": true
+										},
+										"data": {
+											"$ref": "#/components/schemas/User"
+										}
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"$ref": "#/components/responses/ValidationFailed"
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"403": {
+						"$ref": "#/components/responses/Forbidden"
+					},
+					"409": {
+						"description": "Email or username already taken.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/users/{id}": {
+			"get": {
+				"tags": ["Users"],
+				"summary": "Get a single user",
+				"description": "Requires the Admin/Librarian role, or that the caller is requesting their own profile.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "integer"
+						}
+					},
+					{
+						"name": "include_borrows",
+						"in": "query",
+						"schema": {
+							"type": "boolean",
+							"default": false
+						}
+					},
+					{
+						"name": "include_stats",
+						"in": "query",
+						"schema": {
+							"type": "boolean",
+							"default": false
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "The user.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"success": {
+											"type": "boolean",
+											"example": true
+										},
+										"data": {
+											"$ref": "#/components/schemas/User"
+										}
+									}
+								}
+							}
+						}
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"403": {
+						"$ref": "#/components/responses/Forbidden"
+					},
+					"404": {
+						"$ref": "#/components/responses/NotFound"
+					}
+				}
+			},
+			"put": {
+				"tags": ["Users"],
+				"summary": "Update a user",
+				"description": "Requires the resource owner, a Librarian, or an Admin. Which fields a given caller may actually set is enforced server-side and depends on who's calling — see the field-restriction table in `docs/API.md`. Attempting to set `role` without the Admin role returns 403; every other disallowed field is silently dropped rather than rejected.\n",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "integer"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"first_name": {
+										"type": "string"
+									},
+									"last_name": {
+										"type": "string"
+									},
+									"phone": {
+										"type": "string",
+										"nullable": true
+									},
+									"email": {
+										"type": "string",
+										"format": "email"
+									},
+									"password": {
+										"type": "string"
+									},
+									"image_url": {
+										"type": "string",
+										"nullable": true
+									},
+									"role": {
+										"type": "string",
+										"enum": ["Admin", "Librarian", "User"],
+										"description": "Admin-only."
+									},
+									"is_active": {
+										"type": "boolean",
+										"description": "Admin-only."
+									},
+									"email_verified": {
+										"type": "boolean",
+										"description": "Admin-only."
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "User updated.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"success": {
+											"type": "boolean",
+											"example": true
+										},
+										"data": {
+											"$ref": "#/components/schemas/User"
+										}
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"$ref": "#/components/responses/ValidationFailed"
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"403": {
+						"description": "Not the resource owner/Librarian/Admin, or attempted to set `role` without Admin.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"404": {
+						"$ref": "#/components/responses/NotFound"
+					},
+					"409": {
+						"description": "Email already taken by another user.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			},
+			"delete": {
+				"tags": ["Users"],
+				"summary": "Delete a user (soft delete)",
+				"description": "Requires the Admin role. Fails if the user has active borrows, or is the last active Admin.\n",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "integer"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "User deleted."
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"403": {
+						"$ref": "#/components/responses/Forbidden"
+					},
+					"404": {
+						"$ref": "#/components/responses/NotFound"
+					},
+					"409": {
+						"description": "User has active borrows, or is the last active Admin.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/users/{id}/borrow-records": {
+			"get": {
+				"tags": ["Users"],
+				"summary": "Get a user's borrow records",
+				"description": "Requires the Admin/Librarian role, or that the caller owns the records.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "integer"
+						}
+					},
+					{
+						"name": "page",
+						"in": "query",
+						"schema": {
+							"type": "integer",
+							"default": 1
+						}
+					},
+					{
+						"name": "limit",
+						"in": "query",
+						"schema": {
+							"type": "integer",
+							"default": 10
+						}
+					},
+					{
+						"name": "status",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"enum": ["Borrowed", "Returned", "Overdue"]
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Paginated borrow records for this user.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"success": {
+											"type": "boolean",
+											"example": true
+										},
+										"data": {
+											"type": "array",
+											"items": {
+												"$ref": "#/components/schemas/BorrowRecord"
+											}
+										},
+										"pagination": {
+											"$ref": "#/components/schemas/Pagination"
+										}
+									}
+								}
+							}
+						}
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"403": {
+						"$ref": "#/components/responses/Forbidden"
+					},
+					"404": {
+						"$ref": "#/components/responses/NotFound"
+					}
+				}
+			}
+		},
+		"/health": {
+			"get": {
+				"tags": ["Health"],
+				"summary": "Liveness/readiness check",
+				"description": "Verifies the process is up and its dependencies (database, and Redis when configured) are reachable. Used by the Docker healthcheck and any future load balancer/uptime monitor.\n",
+				"security": [],
+				"responses": {
+					"200": {
+						"description": "Healthy — database (and Redis, if configured) reachable.",
+						"content": {
+							"application/json": {
+								"example": {
+									"status": "ok",
+									"uptime_seconds": 42,
+									"timestamp": "2026-08-19T12:00:00.000Z",
+									"database": "connected",
+									"redis": "connected"
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Degraded — database or Redis unreachable.",
+						"content": {
+							"application/json": {
+								"example": {
+									"status": "degraded",
+									"uptime_seconds": 42,
+									"timestamp": "2026-08-19T12:00:00.000Z",
+									"database": "disconnected",
+									"redis": "connected"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/books": {
+			"get": {
+				"tags": ["Books"],
+				"summary": "List books",
+				"description": "Responses are cached for `BOOKS_CACHE_TTL_SECONDS` (default 30s), keyed by the full query string, and invalidated on any create/update/delete.\n",
+				"security": [],
+				"parameters": [
+					{
+						"name": "page",
+						"in": "query",
+						"schema": {
+							"type": "integer",
+							"default": 1
+						}
+					},
+					{
+						"name": "limit",
+						"in": "query",
+						"schema": {
+							"type": "integer",
+							"default": 10
+						}
+					},
+					{
+						"name": "search",
+						"in": "query",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "author_id",
+						"in": "query",
+						"schema": {
+							"type": "integer"
+						}
+					},
+					{
+						"name": "genre",
+						"in": "query",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "status",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"enum": ["Available", "Borrowed", "Reserved", "Lost"]
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Paginated book list.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"success": {
+											"type": "boolean",
+											"example": true
+										},
+										"data": {
+											"type": "array",
+											"items": {
+												"$ref": "#/components/schemas/Book"
+											}
+										},
+										"pagination": {
+											"$ref": "#/components/schemas/Pagination"
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"post": {
+				"tags": ["Books"],
+				"summary": "Create a book",
+				"description": "Requires the Admin or Librarian role.",
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["isbn", "title", "author_id"],
+								"properties": {
+									"isbn": {
+										"type": "string",
+										"example": "978-0451524935"
+									},
+									"title": {
+										"type": "string",
+										"example": "1984"
+									},
+									"author_id": {
+										"type": "integer",
+										"example": 1
+									},
+									"published_date": {
+										"type": "string",
+										"format": "date",
+										"nullable": true
+									},
+									"description": {
+										"type": "string",
+										"nullable": true
+									},
+									"cover_image": {
+										"type": "string",
+										"nullable": true
+									},
+									"genre": {
+										"type": "string",
+										"nullable": true,
+										"example": "Dystopian Fiction"
+									},
+									"language": {
+										"type": "string",
+										"nullable": true,
+										"example": "English"
+									},
+									"pages": {
+										"type": "integer",
+										"nullable": true,
+										"example": 328
+									},
+									"publisher": {
+										"type": "string",
+										"nullable": true
+									},
+									"available_copies": {
+										"type": "integer",
+										"default": 0
+									},
+									"total_copies": {
+										"type": "integer",
+										"default": 0
+									},
+									"status": {
+										"type": "string",
+										"enum": ["Available", "Borrowed", "Reserved", "Lost"],
+										"default": "Available"
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"201": {
+						"description": "Book created.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"success": {
+											"type": "boolean",
+											"example": true
+										},
+										"data": {
+											"$ref": "#/components/schemas/Book"
+										}
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Validation failure, or available_copies exceeds total_copies.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ValidationError"
+								}
+							}
+						}
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"403": {
+						"$ref": "#/components/responses/Forbidden"
+					},
+					"404": {
+						"description": "author_id does not exist.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "A book with this ISBN already exists.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/books/{id}": {
+			"get": {
+				"tags": ["Books"],
+				"summary": "Get a single book",
+				"security": [],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "integer"
+						}
+					},
+					{
+						"name": "include_author",
+						"in": "query",
+						"schema": {
+							"type": "boolean",
+							"default": false
+						}
+					},
+					{
+						"name": "include_borrows",
+						"in": "query",
+						"schema": {
+							"type": "boolean",
+							"default": false
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "The book.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"success": {
+											"type": "boolean",
+											"example": true
+										},
+										"data": {
+											"$ref": "#/components/schemas/Book"
+										}
+									}
+								}
+							}
+						}
+					},
+					"404": {
+						"$ref": "#/components/responses/NotFound"
+					}
+				}
+			},
+			"put": {
+				"tags": ["Books"],
+				"summary": "Update a book",
+				"description": "Requires the Admin or Librarian role. Partial update — every field is optional.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "integer"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"isbn": {
+										"type": "string"
+									},
+									"title": {
+										"type": "string"
+									},
+									"author_id": {
+										"type": "integer"
+									},
+									"published_date": {
+										"type": "string",
+										"format": "date",
+										"nullable": true
+									},
+									"description": {
+										"type": "string",
+										"nullable": true
+									},
+									"cover_image": {
+										"type": "string",
+										"nullable": true
+									},
+									"genre": {
+										"type": "string",
+										"nullable": true
+									},
+									"language": {
+										"type": "string",
+										"nullable": true
+									},
+									"pages": {
+										"type": "integer",
+										"nullable": true
+									},
+									"publisher": {
+										"type": "string",
+										"nullable": true
+									},
+									"available_copies": {
+										"type": "integer"
+									},
+									"total_copies": {
+										"type": "integer"
+									},
+									"status": {
+										"type": "string",
+										"enum": ["Available", "Borrowed", "Reserved", "Lost"]
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Book updated.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"success": {
+											"type": "boolean",
+											"example": true
+										},
+										"data": {
+											"$ref": "#/components/schemas/Book"
+										}
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"$ref": "#/components/responses/ValidationFailed"
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"403": {
+						"$ref": "#/components/responses/Forbidden"
+					},
+					"404": {
+						"$ref": "#/components/responses/NotFound"
+					},
+					"409": {
+						"description": "ISBN already taken by another book.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			},
+			"delete": {
+				"tags": ["Books"],
+				"summary": "Delete a book",
+				"description": "Requires the Admin or Librarian role. Fails if the book has active borrows.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "integer"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Book deleted."
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"403": {
+						"$ref": "#/components/responses/Forbidden"
+					},
+					"404": {
+						"$ref": "#/components/responses/NotFound"
+					},
+					"409": {
+						"description": "Book has active borrows.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/books/{id}/borrow": {
+			"post": {
+				"tags": ["Books"],
+				"summary": "Borrow a book",
+				"description": "Requires the book to have available_copies > 0 and status \"Available\", the caller to have fewer than 5 active borrows, and no existing active borrow of the same book by the same caller.\n",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "integer"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"due_days": {
+										"type": "integer",
+										"default": 14
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"201": {
+						"description": "Book borrowed.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"message": "Book borrowed successfully",
+									"data": {
+										"borrow_record": {
+											"id": 10,
+											"due_date": "2026-08-31T00:00:00.000Z",
+											"status": "Borrowed"
+										},
+										"book": {
+											"id": 1,
+											"title": "1984",
+											"available_copies": 4,
+											"status": "Available"
+										},
+										"due_date": "2026-08-31T00:00:00.000Z",
+										"days_allowed": 14
+									}
+								}
+							}
+						}
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"404": {
+						"$ref": "#/components/responses/NotFound"
+					},
+					"409": {
+						"description": "Book unavailable, borrow limit exceeded, or already borrowed by this user.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/books/{id}/return": {
+			"post": {
+				"tags": ["Books"],
+				"summary": "Return a borrowed book",
+				"description": "Applies a $1/day late fee if returned past the due date.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "integer"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Book returned.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"message": "Book returned successfully",
+									"data": {
+										"borrow_record": {
+											"id": 10,
+											"status": "Returned"
+										},
+										"book": {
+											"id": 1,
+											"available_copies": 5,
+											"status": "Available"
+										},
+										"return_details": {
+											"is_overdue": false,
+											"days_late": 0,
+											"late_fee": 0
+										}
+									}
+								}
+							}
+						}
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"404": {
+						"description": "Book not found, or no active borrow record for this book/user.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/borrow-records/statistics": {
+			"get": {
+				"tags": ["Borrow Records"],
+				"summary": "Get borrowing statistics",
+				"description": "Requires the Admin or Librarian role.",
+				"responses": {
+					"200": {
+						"description": "Aggregate borrowing statistics.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"message": "Borrowing statistics retrieved successfully",
+									"data": {
+										"total_borrows": 120,
+										"active_borrows": 34,
+										"returned_borrows": 80,
+										"overdue_borrows": 6,
+										"avg_borrow_days": 12.4,
+										"generated_at": "2026-08-19T12:00:00.000Z"
+									}
+								}
+							}
+						}
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"403": {
+						"$ref": "#/components/responses/Forbidden"
+					}
+				}
+			}
+		},
+		"/borrow-records/overdue": {
+			"get": {
+				"tags": ["Borrow Records"],
+				"summary": "List overdue borrow records",
+				"description": "Requires the Admin or Librarian role.",
+				"parameters": [
+					{
+						"name": "page",
+						"in": "query",
+						"schema": {
+							"type": "integer",
+							"default": 1
+						}
+					},
+					{
+						"name": "limit",
+						"in": "query",
+						"schema": {
+							"type": "integer",
+							"default": 10
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Paginated overdue borrow records.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"success": {
+											"type": "boolean",
+											"example": true
+										},
+										"data": {
+											"type": "array",
+											"items": {
+												"$ref": "#/components/schemas/BorrowRecord"
+											}
+										},
+										"pagination": {
+											"$ref": "#/components/schemas/Pagination"
+										}
+									}
+								}
+							}
+						}
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"403": {
+						"$ref": "#/components/responses/Forbidden"
+					}
+				}
+			}
+		},
+		"/borrow-records": {
+			"get": {
+				"tags": ["Borrow Records"],
+				"summary": "List all borrow records",
+				"description": "Requires the Admin or Librarian role.",
+				"parameters": [
+					{
+						"name": "page",
+						"in": "query",
+						"schema": {
+							"type": "integer",
+							"default": 1
+						}
+					},
+					{
+						"name": "limit",
+						"in": "query",
+						"schema": {
+							"type": "integer",
+							"default": 10
+						}
+					},
+					{
+						"name": "user_id",
+						"in": "query",
+						"schema": {
+							"type": "integer"
+						}
+					},
+					{
+						"name": "book_id",
+						"in": "query",
+						"schema": {
+							"type": "integer"
+						}
+					},
+					{
+						"name": "status",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"enum": ["Borrowed", "Returned", "Overdue"]
+						}
+					},
+					{
+						"name": "overdue_only",
+						"in": "query",
+						"schema": {
+							"type": "boolean",
+							"default": false
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Paginated borrow records.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"success": {
+											"type": "boolean",
+											"example": true
+										},
+										"data": {
+											"type": "array",
+											"items": {
+												"$ref": "#/components/schemas/BorrowRecord"
+											}
+										},
+										"pagination": {
+											"$ref": "#/components/schemas/Pagination"
+										}
+									}
+								}
+							}
+						}
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"403": {
+						"$ref": "#/components/responses/Forbidden"
+					}
+				}
+			}
+		},
+		"/borrow-records/{id}/extend": {
+			"post": {
+				"tags": ["Borrow Records"],
+				"summary": "Extend a borrow record's due date",
+				"description": "Requires the record's owner, a Librarian, or an Admin.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "integer"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"extension_days": {
+										"type": "integer",
+										"default": 7
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Due date extended.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"success": {
+											"type": "boolean",
+											"example": true
+										},
+										"data": {
+											"$ref": "#/components/schemas/BorrowRecord"
+										}
+									}
+								}
+							}
+						}
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"403": {
+						"$ref": "#/components/responses/Forbidden"
+					},
+					"404": {
+						"$ref": "#/components/responses/NotFound"
+					},
+					"409": {
+						"description": "Record is not currently active (already returned).",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/authors": {
+			"get": {
+				"tags": ["Authors"],
+				"summary": "List authors",
+				"description": "Responses are cached for `AUTHORS_CACHE_TTL_SECONDS` (default 30s), keyed by the full query string, and invalidated on any create/update/delete.\n",
+				"security": [],
+				"parameters": [
+					{
+						"name": "page",
+						"in": "query",
+						"schema": {
+							"type": "integer",
+							"default": 1
+						}
+					},
+					{
+						"name": "limit",
+						"in": "query",
+						"schema": {
+							"type": "integer",
+							"default": 10
+						}
+					},
+					{
+						"name": "search",
+						"in": "query",
+						"schema": {
+							"type": "string"
+						},
+						"description": "Matches first_name, last_name, or email."
+					},
+					{
+						"name": "sort_by",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"default": "created_at"
+						}
+					},
+					{
+						"name": "order",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"enum": ["asc", "desc"],
+							"default": "desc"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Paginated author list.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"success": {
+											"type": "boolean",
+											"example": true
+										},
+										"data": {
+											"type": "array",
+											"items": {
+												"$ref": "#/components/schemas/Author"
+											}
+										},
+										"pagination": {
+											"$ref": "#/components/schemas/Pagination"
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"post": {
+				"tags": ["Authors"],
+				"summary": "Create an author",
+				"description": "Requires the Admin or Librarian role.",
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["first_name", "last_name", "email"],
+								"properties": {
+									"first_name": {
+										"type": "string",
+										"example": "George"
+									},
+									"last_name": {
+										"type": "string",
+										"example": "Orwell"
+									},
+									"email": {
+										"type": "string",
+										"format": "email",
+										"example": "orwell@example.com"
+									},
+									"date_of_birth": {
+										"type": "string",
+										"format": "date",
+										"nullable": true
+									},
+									"biography": {
+										"type": "string",
+										"nullable": true
+									},
+									"phone": {
+										"type": "string",
+										"nullable": true
+									},
+									"image": {
+										"type": "string",
+										"nullable": true
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"201": {
+						"description": "Author created.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"success": {
+											"type": "boolean",
+											"example": true
+										},
+										"data": {
+											"$ref": "#/components/schemas/Author"
+										}
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"$ref": "#/components/responses/ValidationFailed"
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"403": {
+						"$ref": "#/components/responses/Forbidden"
+					},
+					"409": {
+						"description": "An author with this email already exists.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/authors/{id}": {
+			"get": {
+				"tags": ["Authors"],
+				"summary": "Get a single author",
+				"security": [],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "integer"
+						}
+					},
+					{
+						"name": "include_books",
+						"in": "query",
+						"schema": {
+							"type": "boolean",
+							"default": false
+						},
+						"description": "Embed the author's books and a books_count."
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "The author.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"success": {
+											"type": "boolean",
+											"example": true
+										},
+										"data": {
+											"$ref": "#/components/schemas/Author"
+										}
+									}
+								}
+							}
+						}
+					},
+					"404": {
+						"$ref": "#/components/responses/NotFound"
+					}
+				}
+			},
+			"put": {
+				"tags": ["Authors"],
+				"summary": "Update an author",
+				"description": "Requires the Admin or Librarian role. Partial update — every field is optional.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "integer"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"first_name": {
+										"type": "string"
+									},
+									"last_name": {
+										"type": "string"
+									},
+									"email": {
+										"type": "string",
+										"format": "email"
+									},
+									"date_of_birth": {
+										"type": "string",
+										"format": "date",
+										"nullable": true
+									},
+									"biography": {
+										"type": "string",
+										"nullable": true
+									},
+									"phone": {
+										"type": "string",
+										"nullable": true
+									},
+									"image": {
+										"type": "string",
+										"nullable": true
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Author updated.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"success": {
+											"type": "boolean",
+											"example": true
+										},
+										"data": {
+											"$ref": "#/components/schemas/Author"
+										}
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"$ref": "#/components/responses/ValidationFailed"
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"403": {
+						"$ref": "#/components/responses/Forbidden"
+					},
+					"404": {
+						"$ref": "#/components/responses/NotFound"
+					},
+					"409": {
+						"description": "Another author already has this email.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			},
+			"delete": {
+				"tags": ["Authors"],
+				"summary": "Delete an author",
+				"description": "Requires the Admin or Librarian role. Fails if the author still has books attached.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "integer"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Author deleted."
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"403": {
+						"$ref": "#/components/responses/Forbidden"
+					},
+					"404": {
+						"$ref": "#/components/responses/NotFound"
+					},
+					"409": {
+						"description": "Author has books attached — remove or reassign them first.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/auth/register": {
+			"post": {
+				"tags": ["Auth"],
+				"summary": "Register a new User-role account",
+				"security": [],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": [
+									"first_name",
+									"last_name",
+									"user_name",
+									"email",
+									"password"
+								],
+								"properties": {
+									"first_name": {
+										"type": "string",
+										"example": "John"
+									},
+									"last_name": {
+										"type": "string",
+										"example": "Doe"
+									},
+									"user_name": {
+										"type": "string",
+										"minLength": 3,
+										"example": "johndoe"
+									},
+									"email": {
+										"type": "string",
+										"format": "email"
+									},
+									"phone": {
+										"type": "string",
+										"nullable": true
+									},
+									"password": {
+										"type": "string",
+										"description": "8+ characters, at least one uppercase, one lowercase, one number.",
+										"example": "Password123"
+									},
+									"image_url": {
+										"type": "string",
+										"nullable": true
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"201": {
+						"description": "Account created.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/AuthTokenResponse"
+								}
+							}
+						}
+					},
+					"400": {
+						"$ref": "#/components/responses/ValidationFailed"
+					},
+					"409": {
+						"description": "Email or username already taken.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/auth/login": {
+			"post": {
+				"tags": ["Auth"],
+				"summary": "Log in and receive a JWT",
+				"security": [],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["emailOrUsername", "password"],
+								"properties": {
+									"emailOrUsername": {
+										"type": "string",
+										"example": "john@example.com"
+									},
+									"password": {
+										"type": "string",
+										"example": "Password123"
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Login successful.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/AuthTokenResponse"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Invalid credentials, or account deactivated.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Too many failed attempts — account temporarily locked out.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/auth/logout": {
+			"post": {
+				"tags": ["Auth"],
+				"summary": "Log out (blacklists the current token)",
+				"description": "Revokes the token used on this request — it's rejected on every subsequent request even though it hasn't naturally expired yet.\n",
+				"responses": {
+					"200": {
+						"description": "Logged out."
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					}
+				}
+			}
+		},
+		"/auth/me": {
+			"get": {
+				"tags": ["Auth"],
+				"summary": "Get the current user's profile",
+				"responses": {
+					"200": {
+						"description": "Current user (no password field).",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"success": {
+											"type": "boolean",
+											"example": true
+										},
+										"data": {
+											"$ref": "#/components/schemas/User"
+										}
+									}
+								}
+							}
+						}
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					}
+				}
+			}
+		},
+		"/auth/refresh": {
+			"post": {
+				"tags": ["Auth"],
+				"summary": "Issue a new JWT for the current user",
+				"responses": {
+					"200": {
+						"description": "New token issued."
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					}
+				}
+			}
+		},
+		"/auth/change-password": {
+			"post": {
+				"tags": ["Auth"],
+				"summary": "Change the current user's password",
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["current_password", "new_password"],
+								"properties": {
+									"current_password": {
+										"type": "string"
+									},
+									"new_password": {
+										"type": "string",
+										"description": "8+ characters, at least one uppercase, one lowercase, one number. Must differ from the current password."
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Password changed."
+					},
+					"400": {
+						"$ref": "#/components/responses/ValidationFailed"
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					}
+				}
+			}
+		},
+		"/auth/forgot-password": {
+			"post": {
+				"tags": ["Auth"],
+				"summary": "Request a password reset email",
+				"description": "Always responds 200 with the same generic message, whether or not the email is registered, to avoid leaking which emails exist. If the account exists, emails a single-use, 1-hour reset token (or logs it server-side as a dev-mode fallback if SMTP isn't configured) — the token itself is never returned in this response.\n",
+				"security": [],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["email"],
+								"properties": {
+									"email": {
+										"type": "string",
+										"format": "email"
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Generic acknowledgement — see description.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"message": "If an account with that email exists, a password reset link has been sent."
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/auth/reset-password": {
+			"post": {
+				"tags": ["Auth"],
+				"summary": "Complete a password reset",
+				"description": "Authorization comes from possessing a valid reset token, not from a session. Single-use — a second attempt with the same token returns 400.\n",
+				"security": [],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["token", "new_password"],
+								"properties": {
+									"token": {
+										"type": "string",
+										"description": "Token from the forgot-password email."
+									},
+									"new_password": {
+										"type": "string"
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Password reset."
+					},
+					"400": {
+						"description": "Invalid, expired, or already-used reset token; or validation failure.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/auth/setup-admin": {
+			"post": {
+				"tags": ["Auth"],
+				"summary": "Create the first Admin account (one-time bootstrap)",
+				"description": "Public, but gated by `INITIAL_SETUP_KEY` and refuses if any user already exists in the system — intended for first-run initialization only, not general admin creation.\n",
+				"security": [],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["admin_email", "admin_password", "setup_key"],
+								"properties": {
+									"admin_email": {
+										"type": "string",
+										"format": "email"
+									},
+									"admin_password": {
+										"type": "string"
+									},
+									"setup_key": {
+										"type": "string",
+										"description": "Value of the INITIAL_SETUP_KEY env var."
+									},
+									"first_name": {
+										"type": "string",
+										"default": "System"
+									},
+									"last_name": {
+										"type": "string",
+										"default": "Administrator"
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"201": {
+						"description": "Admin account created."
+					},
+					"401": {
+						"description": "Invalid setup key.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "System already initialized (a user already exists).",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}

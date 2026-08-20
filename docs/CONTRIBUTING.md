@@ -45,6 +45,11 @@ All four should pass before you open a PR — the CI workflow
   `ADMIN_EDITABLE_FIELDS` in `users.model.js`, or `UPDATABLE_FIELDS` in
   `books.model.js` / `authors.model.js`) — never interpolate a client-supplied
   key directly into SQL.
+- New/changed routes need an `@openapi` JSDoc block (see any existing route
+  for the pattern), then `npm run docs:generate` to rebuild
+  `src/openapi.json` and `docs/API.md` from it. Don't hand-edit either file —
+  CI regenerates and diffs both, so a route change without a regeneration
+  fails the lint job.
 
 ## Tests
 
@@ -56,14 +61,14 @@ All four should pass before you open a PR — the CI workflow
   locally.
 - Rate limiting is disabled under `NODE_ENV=test` (see `server.js`) so
   functional tests aren't flaky against shared per-minute buckets — rate
-  limit *behavior* is tested manually via the `curl` procedures in
+  limit _behavior_ is tested manually via the `curl` procedures in
   [`SECURITY_TESTING.md`](SECURITY_TESTING.md), not the Jest suite.
 
 ## Commit / PR expectations
 
 - Keep commits scoped — one logical change per commit is easier to review
   and revert than a mixed bag.
-- Describe *why* in the PR description, not just what changed — the diff
+- Describe _why_ in the PR description, not just what changed — the diff
   already shows what changed.
 - Don't skip CI. If a check is failing and you believe it's wrong, fix the
   check itself in the same PR rather than working around it.

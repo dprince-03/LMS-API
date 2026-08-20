@@ -13,17 +13,17 @@ and role-based access control (Admin / Librarian / User).
 
 ## Tech stack
 
-| Concern          | Choice                                    |
-| ----------------- | ------------------------------------------ |
-| Runtime           | Node.js                                    |
-| Framework         | Express 5                                  |
-| Database          | MySQL (via `mysql2/promise`, pooled)       |
-| Auth              | JWT (`jsonwebtoken`) + `bcrypt` for hashing |
-| Validation        | Zod schemas (`src/validation/schemas.js`) via a shared `validateBody` middleware |
-| Cache / rate limiting | Redis (`ioredis`), in-process fallback if `REDIS_URL` is unset |
-| Logging           | `pino`, structured, with credential redaction |
-| Testing           | Jest + Supertest                           |
-| Process manager   | `nodemon` in dev, plain `node` in prod     |
+| Concern               | Choice                                                                           |
+| --------------------- | -------------------------------------------------------------------------------- |
+| Runtime               | Node.js                                                                          |
+| Framework             | Express 5                                                                        |
+| Database              | MySQL (via `mysql2/promise`, pooled)                                             |
+| Auth                  | JWT (`jsonwebtoken`) + `bcrypt` for hashing                                      |
+| Validation            | Zod schemas (`src/validation/schemas.js`) via a shared `validateBody` middleware |
+| Cache / rate limiting | Redis (`ioredis`), in-process fallback if `REDIS_URL` is unset                   |
+| Logging               | `pino`, structured, with credential redaction                                    |
+| Testing               | Jest + Supertest                                                                 |
+| Process manager       | `nodemon` in dev, plain `node` in prod                                           |
 
 ## Directory structure
 
@@ -147,6 +147,7 @@ erDiagram
 ```
 
 Notes:
+
 - `users.deleted_at` implements a soft delete; every user query filters
   `WHERE deleted_at IS NULL`. Books, authors, and borrow records are hard-
   deleted.
@@ -157,18 +158,18 @@ Notes:
 ## Auth & authorization model
 
 1. **Authentication** (`verifyToken` middleware): reads `Authorization: Bearer
-   <token>`, verifies the JWT signature/expiry, loads the user from the DB by
+<token>`, verifies the JWT signature/expiry, loads the user from the DB by
    the token's `id` claim, rejects if the user is missing or deactivated, and
    attaches the full user row to `req.user`.
 2. **Authorization**, layered on top of that, three flavors depending on the
    route:
-   - `requireRole([...])` — role allow-list (`requireAdmin`,
-     `requireAdminOrLibrarian`, `requireUser` are pre-built instances of this).
-   - `requireOwnershipOrAdmin(param)` — lets the request through if the caller
-     is Admin/Librarian *or* the `:id` route param matches `req.user.id`.
-   - Inline checks inside a controller (used for borrow-record ownership on
-     `extend` and `getUserBorrowRecord`, since the resource owner isn't known
-     until the record is loaded from the DB).
+    - `requireRole([...])` — role allow-list (`requireAdmin`,
+      `requireAdminOrLibrarian`, `requireUser` are pre-built instances of this).
+    - `requireOwnershipOrAdmin(param)` — lets the request through if the caller
+      is Admin/Librarian _or_ the `:id` route param matches `req.user.id`.
+    - Inline checks inside a controller (used for borrow-record ownership on
+      `extend` and `getUserBorrowRecord`, since the resource owner isn't known
+      until the record is loaded from the DB).
 3. **`optionalAuth`** populates `req.user` if a valid token is present but
    doesn't reject the request otherwise — used on public read endpoints
    (`GET /books`, `GET /authors`) that may want to personalize the response
@@ -182,19 +183,19 @@ future refactor target, not active enforcement.
 
 ### Role matrix (as routed today)
 
-| Resource       | Admin | Librarian | User (own)      | Public |
-| -------------- | :---: | :-------: | :--------------: | :----: |
-| Users (list)   |  ✅   |    ❌     |        ❌         |   ❌   |
-| Users (single) |  ✅   |    ✅     |        ✅         |   ❌   |
-| Users (create) |  ✅   |    ❌     |        ❌         |   ❌   |
-| Users (update) |  ✅¹  |    ⚠️²    |        ⚠️²        |   ❌   |
-| Users (delete) |  ✅   |    ❌     |        ❌         |   ❌   |
-| Books (read)   |  ✅   |    ✅     |        ✅         |   ✅   |
-| Books (write)  |  ✅   |    ✅     |        ❌         |   ❌   |
-| Authors (read) |  ✅   |    ✅     |        ✅         |   ✅   |
-| Authors (write)|  ✅   |    ✅     |        ❌         |   ❌   |
-| Borrow/return  |  ✅   |    ✅     |        ✅         |   ❌   |
-| Borrow records |  ✅   |    ✅     |    own only       |   ❌   |
+| Resource        | Admin | Librarian | User (own) | Public |
+| --------------- | :---: | :-------: | :--------: | :----: |
+| Users (list)    |  ✅   |    ❌     |     ❌     |   ❌   |
+| Users (single)  |  ✅   |    ✅     |     ✅     |   ❌   |
+| Users (create)  |  ✅   |    ❌     |     ❌     |   ❌   |
+| Users (update)  |  ✅¹  |    ⚠️²    |    ⚠️²     |   ❌   |
+| Users (delete)  |  ✅   |    ❌     |     ❌     |   ❌   |
+| Books (read)    |  ✅   |    ✅     |     ✅     |   ✅   |
+| Books (write)   |  ✅   |    ✅     |     ❌     |   ❌   |
+| Authors (read)  |  ✅   |    ✅     |     ✅     |   ✅   |
+| Authors (write) |  ✅   |    ✅     |     ❌     |   ❌   |
+| Borrow/return   |  ✅   |    ✅     |     ✅     |   ❌   |
+| Borrow records  |  ✅   |    ✅     |  own only  |   ❌   |
 
 ¹ Full field set (including `role`, `is_active`, `email_verified`).
 ² Restricted field set — see the `PUT /users/:id` field table in
@@ -217,6 +218,7 @@ stateDiagram-v2
 ```
 
 Business rules enforced in `bookRecords.controllers.js` / `books.model.js`:
+
 - Max 5 concurrent borrows per user (`canUserBorrowMore`).
 - A user can't borrow the same book twice while an active record exists.
 - Borrowing and returning both run inside a DB transaction
@@ -244,10 +246,11 @@ Business rules enforced in `bookRecords.controllers.js` / `books.model.js`:
   a single `mysql2` pool (`database.config.js`); transactions borrow a
   dedicated connection from the pool for the duration of the transaction only.
 - **Redis-backed shared state, with an in-process fallback.** The token
-  blacklist and role-based rate limiter (`src/utils/store.js`) use Redis when
-  `REDIS_URL` is set — the Docker Compose stack always provisions it — and
-  fall back to an in-process `Map` otherwise, which is fine for local dev but
-  won't survive a restart or work across multiple instances.
+  blacklist, role-based rate limiter (`src/utils/store.js`), and the
+  `GET /books`/`GET /authors` response cache (`src/utils/cache.js`) all use
+  Redis when `REDIS_URL` is set — the Docker Compose stack always provisions
+  it — and fall back to an in-process `Map` otherwise, which is fine for
+  local dev but won't survive a restart or work across multiple instances.
 - **Migrations are forward-only, dependency-free `.sql` files** applied by
   `scripts/migrate.js` (tracked in a `schema_migrations` table) — not a full
   framework, since the schema is small enough that a straight-line list is
@@ -256,5 +259,6 @@ Business rules enforced in `bookRecords.controllers.js` / `books.model.js`:
 ## Remaining known gaps
 
 See [`TODO.md`](TODO.md) for the full, prioritized list of what's still open
-(mostly P2/P3 polish at this point — e.g. OpenAPI-generated docs instead of
-handwritten ones, DB connection pool tuning under real load).
+(mostly P2/P3 polish at this point — e.g. DB connection pool tuning under
+real load) and [`SECURITY_TESTING.md`](SECURITY_TESTING.md) for the
+still-open security items.

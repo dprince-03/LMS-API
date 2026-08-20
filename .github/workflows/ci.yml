@@ -1,68 +1,129 @@
-name: CI
+name: CI/CD
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    push:
+        branches: [main]
+        tags: ["v*.*.*"]
+    pull_request:
+        branches: [main]
+    workflow_dispatch:
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+permissions:
+    contents: read
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run format:check
+    lint:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+                  cache: npm
+            - run: npm ci
+            - run: npm run lint
+            - run: npm run format:check
+            - name: Verify generated API docs are up to date
+              run: |
+                  npm run docs:generate
+                  if [ -n "$(git status --porcelain src/openapi.json docs/API.md)" ]; then
+                    echo "::error::src/openapi.json / docs/API.md are stale — run 'npm run docs:generate' and commit the result."
+                    git diff src/openapi.json docs/API.md
+                    exit 1
+                  fi
 
-  test:
-    runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: testpass123
-          MYSQL_DATABASE: library_db_test
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -uroot -ptestpass123"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - name: Load test schema
-        run: mysql -h 127.0.0.1 -uroot -ptestpass123 library_db_test < tests/db/test.sql
-      - name: Run tests with coverage
-        run: npm run test:coverage
-        env:
-          NODE_ENV: test
-          DB_HOST: 127.0.0.1
-          DB_USER: root
-          DB_PASSWORD: testpass123
-          DB_NAME: library_db_test
-          DB_PORT: 3306
-          JWT_SECRET: ci_only_secret_key_that_is_at_least_32_characters_long
-          BCRYPT_ROUNDS: 4
-          INITIAL_SETUP_KEY: ci_setup_key
-          DISABLE_OVERDUE_JOB: "true"
-      - name: Audit dependencies
-        run: npm audit --audit-level=high
+    test:
+        runs-on: ubuntu-latest
+        services:
+            mysql:
+                image: mysql:8.0
+                env:
+                    MYSQL_ROOT_PASSWORD: testpass123
+                    MYSQL_DATABASE: library_db_test
+                ports:
+                    - 3306:3306
+                options: >-
+                    --health-cmd="mysqladmin ping -uroot -ptestpass123"
+                    --health-interval=10s
+                    --health-timeout=5s
+                    --health-retries=10
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+                  cache: npm
+            - run: npm ci
+            - name: Load test schema
+              run: mysql -h 127.0.0.1 -uroot -ptestpass123 library_db_test < tests/db/test.sql
+            - name: Run tests with coverage
+              run: npm run test:coverage
+              env:
+                  NODE_ENV: test
+                  DB_HOST: 127.0.0.1
+                  DB_USER: root
+                  DB_PASSWORD: testpass123
+                  DB_NAME: library_db_test
+                  DB_PORT: 3306
+                  JWT_SECRET: ci_only_secret_key_that_is_at_least_32_characters_long
+                  BCRYPT_ROUNDS: 4
+                  INITIAL_SETUP_KEY: ci_setup_key
+                  DISABLE_OVERDUE_JOB: "true"
+            - name: Upload coverage report
+              uses: actions/upload-artifact@v4
+              with:
+                  name: coverage-report
+                  path: coverage/
+                  retention-days: 14
+            - name: Audit dependencies
+              run: npm audit --audit-level=high
 
-  docker-build:
-    runs-on: ubuntu-latest
-    needs: [lint, test]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build image
-        run: docker build -f docker/Dockerfile -t lms-api:${{ github.sha }} .
+    docker:
+        runs-on: ubuntu-latest
+        needs: [lint, test]
+        permissions:
+            contents: read
+            packages: write
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: docker/setup-buildx-action@v3
+
+            - name: Log in to GitHub Container Registry
+              if: github.event_name != 'pull_request'
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Derive image tags/labels
+              id: meta
+              uses: docker/metadata-action@v5
+              with:
+                  images: ghcr.io/${{ github.repository }}
+                  tags: |
+                      type=raw,value=latest,enable={{is_default_branch}}
+                      type=sha,format=short
+                      type=semver,pattern={{version}}
+
+            # On PRs this builds and validates the image (from the runtime
+            # target Dockerfile targets in prod) without pushing anywhere,
+            # so a broken Dockerfile fails CI before it ever reaches main.
+            # On pushes to main / version tags it also publishes to GHCR,
+            # which is the actual "CD" half of this pipeline.
+            - name: Build (and push on main/tags)
+              uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  file: docker/Dockerfile
+                  target: runtime
+                  push: ${{ github.event_name != 'pull_request' }}
+                  tags: ${{ steps.meta.outputs.tags }}
+                  labels: ${{ steps.meta.outputs.labels }}
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max

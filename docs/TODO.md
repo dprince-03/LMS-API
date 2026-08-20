@@ -3,11 +3,11 @@
 Status: **all phases complete.** Every item below was fixed, verified against
 a real MySQL database (Docker or local), and covered by the test suite where
 applicable — this file is now the completion record, not a punch list.
-140 tests pass (`npm test`), coverage thresholds are enforced and met
+143 tests pass (`npm test`), coverage thresholds are enforced and met
 (`npm run test:coverage`), `npm audit` reports 0 vulnerabilities, ESLint and
 Prettier are both clean, the Docker Compose stack (API + MySQL + Redis)
 builds and runs end-to-end, and CI (`.github/workflows/ci.yml`) runs all of
-the above on every push/PR.
+the above — plus publishing the image to GHCR — on every push/PR.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the summarized release notes.
 
@@ -131,8 +131,7 @@ Legend: `P0` blocking/critical · `P1` high · `P2` medium · `P3` low/polish
 - [x] Test suite runs green: 140/140 (`npm test`) against a real MySQL
       database, all `tests/api/*.test.js` files verified against the fixed
       controllers. (Along the way, fixed several pre-existing test-fixture
-      bugs unrelated to the Phase 0/1 code fixes: a `beforeAll`-creates-once
-      + `afterEach`-wipes-everything pattern across four test files that
+      bugs unrelated to the Phase 0/1 code fixes: a `beforeAll`-creates-once + `afterEach`-wipes-everything pattern across four test files that
       invalidated tokens mid-suite, a hardcoded wrong password in one admin
       login, and a UNIQUE-constraint collision from a static default
       `user_name` reused across two users in the same test.)
@@ -163,10 +162,7 @@ Legend: `P0` blocking/critical · `P1` high · `P2` medium · `P3` low/polish
 - [x] Stale `docs/testing_setup_guide.md` removed (described a directory
       layout that never matched the real one).
 - [x] `CONTRIBUTING.md` and `CHANGELOG.md` added.
-- [ ] **P3 (deferred)** Generate `docs/API.md` from an OpenAPI/Swagger spec
-      instead of hand-maintaining it. Not done — the API surface only just
-      stabilized in this pass; revisit once it's been stable for a while
-      and drift becomes a real (not hypothetical) problem.
+- [x] `docs/API.md` is now generated, not hand-maintained — see Phase 8.
 
 ---
 
@@ -197,13 +193,45 @@ Legend: `P0` blocking/critical · `P1` high · `P2` medium · `P3` low/polish
       (in-process TTL cache, invalidated on write).
 - [x] DB connection pool made configurable (`DB_CONNECTION_LIMIT`,
       `DB_CONNECT_TIMEOUT`) and slow-query logging added
-      (`SLOW_QUERY_THRESHOLD_MS`). Further *tuning* of these values needs
+      (`SLOW_QUERY_THRESHOLD_MS`). Further _tuning_ of these values needs
       real observed production traffic, which doesn't exist yet — the
       infrastructure to observe and adjust is in place.
 - [x] Scheduled job (`node-cron`) added to mark overdue borrow records
       periodically instead of only recalculating on-demand
       (`src/jobs/overdue.job.js`, configurable via `OVERDUE_JOB_CRON`,
       disabled in tests via `DISABLE_OVERDUE_JOB`).
+
+---
+
+## Phase 8 — API docs, CI/CD, and cache scaling
+
+- [x] OpenAPI 3.0 spec added, built from `@openapi` JSDoc blocks on every
+      route (`src/config/swagger.config.js` + `src/routes/*.routes.js`).
+      Served interactively at `/api/docs` (`swagger-ui-express`) whenever
+      the server is running, with the raw spec at `/api/docs.json`.
+- [x] `docs/API.md` is now generated from that same spec
+      (`npm run docs:generate` → `scripts/generate-docs.js`), not
+      hand-maintained — closes the Phase 5 deferred item. CI regenerates and
+      diffs both `src/openapi.json` and `docs/API.md` on every push, so a
+      route change without a regeneration fails the lint job instead of
+      silently drifting.
+- [x] `docs/SECURITY_TESTING.md` rewritten against the current codebase —
+      the previous version still described the Phase 0 privilege-escalation
+      and SQL-injection findings as open months after they were fixed. Now
+      accurate: closed items marked verified with current file/line
+      references, two low-priority items still genuinely open (timing-based
+      login enumeration, `setup-admin`'s ad-hoc password check).
+- [x] CI/CD: image now published to GHCR on `main`/version tags (was
+      build-and-discard before), with build caching and Dependabot for
+      npm/Docker/Actions.
+- [x] Response cache (`src/utils/cache.js`) made Redis-backed when
+      `REDIS_URL` is set, falling back to in-process otherwise — previously
+      always in-process, which meant stale/inconsistent responses across
+      more than one instance behind a load balancer even though the rate
+      limiter and token blacklist had already made that jump.
+- [x] `/api/health` now also checks Redis connectivity when configured
+      (previously database-only); Redis being unconfigured is reported as
+      `not_configured`, not treated as a failure.
 
 ---
 

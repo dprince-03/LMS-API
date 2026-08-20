@@ -15,7 +15,7 @@ const SimpleCache = require("../utils/cache");
 
 // Short TTL cache for the public, read-heavy book endpoints. Cleared on
 // any write (create/update/delete) so stale data can't linger past a write.
-const booksCache = new SimpleCache(parseInt(process.env.BOOKS_CACHE_TTL_SECONDS) || 30);
+const booksCache = new SimpleCache("books", parseInt(process.env.BOOKS_CACHE_TTL_SECONDS) || 30);
 
 const createBooks = async (req, res) => {
 	try {
@@ -75,7 +75,7 @@ const createBooks = async (req, res) => {
 			status: status || "Available",
 		});
 
-		booksCache.clear();
+		await booksCache.clear();
 
 		res.status(201).json({
 			success: true,
@@ -93,7 +93,7 @@ const getAllBooks = async (req, res) => {
 		const { page = 1, limit = 10, search = "", author_id, genre, status } = req.query;
 
 		const cacheKey = req.originalUrl;
-		const cached = booksCache.get(cacheKey);
+		const cached = await booksCache.get(cacheKey);
 		if (cached) {
 			return res.status(200).json(cached);
 		}
@@ -135,7 +135,7 @@ const getAllBooks = async (req, res) => {
 			},
 		};
 
-		booksCache.set(cacheKey, responseBody);
+		await booksCache.set(cacheKey, responseBody);
 		res.status(200).json(responseBody);
 	} catch (error) {
 		logger.error({ err: error }, "Error fetching books");
@@ -233,7 +233,7 @@ const updateBooksById = async (req, res) => {
 		}
 
 		const updatedBook = await updateBookById(parseInt(id), updateData);
-		booksCache.clear();
+		await booksCache.clear();
 
 		res.status(200).json({
 			success: true,
@@ -277,7 +277,7 @@ const deleteBooksById = async (req, res) => {
 				.json({ success: false, message: "Book not found or already deleted" });
 		}
 
-		booksCache.clear();
+		await booksCache.clear();
 
 		res.status(200).json({ success: true, message: "Book successfully deleted" });
 	} catch (error) {
